@@ -157,13 +157,26 @@ async function apiRequest(path, options = {}) {
     },
     ...options
   });
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.error || "Máy chủ không thể xử lý yêu cầu.");
+
+  const text = await response.text();
+  let payload = {};
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(
+      `Máy chủ trả về dữ liệu không hợp lệ từ ${path}: ${text.substring(0, 160)}`
+    );
   }
+
+  if (!response.ok) {
+    throw new Error(
+      payload.error || `Máy chủ không thể xử lý yêu cầu (${path}).`
+    );
+  }
+
   return payload;
 }
-
 function permissions() {
   return state.session?.permissions || {};
 }
