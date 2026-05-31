@@ -23,6 +23,7 @@ tự động đồng nghĩa với đạo văn và tỷ lệ thấp không bảo 
 - Lớp tìm kiếm tách rời với adapter OpenSearch và thao tác reindex.
 - Ba vai trò demo, phạm vi dữ liệu theo tổ chức và nhật ký kiểm toán.
 - Xuất báo cáo PDF; OCR fallback tùy chọn cho PDF scan khi có Tesseract.
+- WebDiscovery qua Tavily hoặc Brave theo opt-in, có namespace nguồn riêng theo tổ chức.
 
 ## 3. Hướng triển khai được khuyến nghị
 

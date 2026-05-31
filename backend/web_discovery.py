@@ -1,25 +1,30 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any
-from urllib.error import HTTPError, URLError
+from typing import Any, Callable
+from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
 
 from .text import count_words, split_sentences
 
 
-VI_STOPWORDS = {
-    "và", "của", "là", "các", "một", "những", "trong", "cho", "được", "với", "khi", "này",
-    "đó", "để", "từ", "the", "and", "that", "this", "with", "from", "are", "was", "were", "have"
+STOPWORDS = {
+    "và", "của", "là", "các", "một", "những", "trong", "cho", "được", "với", "khi",
+    "này", "đó", "để", "từ", "the", "and", "that", "this", "with", "from", "are",
+    "was", "were", "have",
 }
+DiscoveryProgressCallback = Callable[[int, int, int], None]
 
 
 @dataclass
 class DiscoveryResult:
     provider: str
     enabled: bool
+    external_processing: bool
     queries: list[str]
     indexed: int
     skipped: int
@@ -30,6 +35,7 @@ class DiscoveryResult:
         return {
             "provider": self.provider,
             "enabled": self.enabled,
+            "externalProcessing": self.external_processing,
             "queries": self.queries,
             "indexed": self.indexed,
             "skipped": self.skipped,
@@ -39,23 +45,27 @@ class DiscoveryResult:
 
 
 def build_queries(text: str, *, max_queries: int = 3) -> list[str]:
-    sentences = []
+    candidates: list[tuple[int, str]] = []
     for sentence in split_sentences(text):
         clean = re.sub(r"\s+", " ", sentence).strip(" \t\n\r\"'“”‘’.:,;()[]{}")
         words = re.findall(r"[\wÀ-ỹ]+", clean, flags=re.UNICODE)
         if 10 <= len(words) <= 32:
-            distinct = len({word.lower() for word in words if word.lower() not in VI_STOPWORDS})
-            sentences.append((distinct, clean))
-    sentences.sort(reverse=True, key=lambda item: (item[0], len(item[1])))
-    queries = []
-    for _score, sentence in sentences:
+            distinct = len({word.lower() for word in words if word.lower() not in STOPWORDS})
+            candidates.append((distinct, clean[:360]))
+    candidates.sort(reverse=True, key=lambda item: (item[0], len(item[1])))
+    queries: list[str] = []
+    for _score, sentence in candidates:
         if sentence not in queries:
             queries.append(sentence)
         if len(queries) >= max_queries:
             break
     if queries:
         return queries
-    tokens = [token.lower() for token in re.findall(r"[\wÀ-ỹ]+", text, flags=re.UNICODE) if token.lower() not in VI_STOPWORDS]
+    tokens = [
+        token.lower()
+        for token in re.findall(r"[\wÀ-ỹ]+", text, flags=re.UNICODE)
+        if token.lower() not in STOPWORDS
+    ]
     return [" ".join(tokens[:14])] if tokens else []
 
 
@@ -64,118 +74,211 @@ class WebDiscovery:
         self.settings = settings
         self.storage = storage
 
-    def discover_and_index(self, text: str, *, organization_id: int | None = None, max_results: int = 5) -> dict[str, Any]:
-        queries = build_queries(text)
+    def status(self) -> dict[str, bool]:
+        return {
+            "tavily": bool(self.settings.tavily_api_key),
+            "brave": bool(self.settings.brave_search_api_key),
+        }
+
+    def discover_and_index(
+        self,
+        text: str,
+        *,
+        organization_id: int | None,
+        max_results: int | None = None,
+        progress_callback: DiscoveryProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        queries = build_queries(text, max_queries=self.settings.web_discovery_max_queries)
         if not queries:
-            return DiscoveryResult("none", False, [], 0, 0, "Không tạo được truy vấn tìm kiếm từ tài liệu.", []).to_dict()
+            return DiscoveryResult(
+                "none", False, False, [], 0, 0,
+                "Không tạo được truy vấn tìm kiếm từ tài liệu.", [],
+            ).to_dict()
+        result_limit = max_results or self.settings.web_discovery_max_results
+        result_limit = max(1, min(20, int(result_limit)))
         if self.settings.tavily_api_key:
-            return self._tavily(queries, organization_id=organization_id, max_results=max_results).to_dict()
+            return self._tavily(queries, organization_id, result_limit, progress_callback).to_dict()
         if self.settings.brave_search_api_key:
-            return self._brave(queries, organization_id=organization_id, max_results=max_results).to_dict()
+            return self._brave(queries, organization_id, result_limit, progress_callback).to_dict()
+        if progress_callback:
+            progress_callback(len(queries), len(queries), 0)
         return DiscoveryResult(
             "not-configured",
+            False,
             False,
             queries,
             0,
             0,
-            "Chưa cấu hình TAVILY_API_KEY hoặc BRAVE_SEARCH_API_KEY nên hệ thống chỉ đối chiếu kho đã có.",
+            "Chưa cấu hình Tavily hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
             [],
         ).to_dict()
 
-    def _tavily(self, queries: list[str], *, organization_id: int | None, max_results: int) -> DiscoveryResult:
-        indexed = 0
-        skipped = 0
+    def _tavily(
+        self,
+        queries: list[str],
+        organization_id: int | None,
+        max_results: int,
+        progress_callback: DiscoveryProgressCallback | None = None,
+    ) -> DiscoveryResult:
         sources: list[dict[str, Any]] = []
+        skipped = 0
         seen_urls: set[str] = set()
-        for query in queries:
-            payload = {
+        errors: list[str] = []
+        workers = min(len(queries), self.settings.web_discovery_parallel_workers)
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+            pending = {executor.submit(self._fetch_tavily, query, max_results): query for query in queries}
+            for completed, future in enumerate(as_completed(pending), start=1):
+                query = pending[future]
+                try:
+                    data = future.result()
+                except Exception as error:
+                    errors.append(str(error))
+                    if progress_callback:
+                        progress_callback(completed, len(queries), len(sources))
+                    continue
+                for item in data.get("results", []):
+                    indexed = self._index_candidate(
+                        provider="tavily",
+                        query=query,
+                        canonical_url=str(item.get("url") or ""),
+                        title=str(item.get("title") or ""),
+                        content=str(item.get("raw_content") or item.get("content") or ""),
+                        organization_id=organization_id,
+                        minimum_words=40,
+                        seen_urls=seen_urls,
+                    )
+                    if indexed:
+                        sources.append(indexed)
+                    else:
+                        skipped += 1
+                if progress_callback:
+                    progress_callback(completed, len(queries), len(sources))
+        message = (
+            f"Đã tìm và lập chỉ mục {len(sources)} nguồn web công khai qua Tavily."
+            if sources else "Tavily không trả về nguồn đủ nội dung để lập chỉ mục."
+        )
+        if errors:
+            message += f" Có {len(errors)} truy vấn gặp lỗi."
+        return DiscoveryResult("tavily", True, True, queries, len(sources), skipped, message, sources)
+
+    def _brave(
+        self,
+        queries: list[str],
+        organization_id: int | None,
+        max_results: int,
+        progress_callback: DiscoveryProgressCallback | None = None,
+    ) -> DiscoveryResult:
+        sources: list[dict[str, Any]] = []
+        skipped = 0
+        seen_urls: set[str] = set()
+        errors: list[str] = []
+        workers = min(len(queries), self.settings.web_discovery_parallel_workers)
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+            pending = {executor.submit(self._fetch_brave, query, max_results): query for query in queries}
+            for completed, future in enumerate(as_completed(pending), start=1):
+                query = pending[future]
+                try:
+                    data = future.result()
+                except Exception as error:
+                    errors.append(str(error))
+                    if progress_callback:
+                        progress_callback(completed, len(queries), len(sources))
+                    continue
+                for item in (data.get("web") or {}).get("results", []):
+                    indexed = self._index_candidate(
+                        provider="brave",
+                        query=query,
+                        canonical_url=str(item.get("url") or ""),
+                        title=str(item.get("title") or ""),
+                        content=" ".join(
+                            [str(item.get("description") or ""), " ".join(item.get("extra_snippets") or [])]
+                        ),
+                        organization_id=organization_id,
+                        minimum_words=18,
+                        seen_urls=seen_urls,
+                    )
+                    if indexed:
+                        sources.append(indexed)
+                    else:
+                        skipped += 1
+                if progress_callback:
+                    progress_callback(completed, len(queries), len(sources))
+        message = (
+            f"Đã lập chỉ mục {len(sources)} kết quả tóm tắt từ Brave."
+            if sources else "Brave không trả về nguồn đủ nội dung để lập chỉ mục."
+        )
+        if errors:
+            message += f" Có {len(errors)} truy vấn gặp lỗi."
+        return DiscoveryResult("brave", True, True, queries, len(sources), skipped, message, sources)
+
+    def _fetch_tavily(self, query: str, max_results: int) -> dict[str, Any]:
+        return self._json_request(
+            "https://api.tavily.com/search",
+            {
                 "query": query,
                 "search_depth": "basic",
-                "max_results": max(1, min(8, max_results)),
+                "max_results": max_results,
                 "include_raw_content": True,
                 "include_answer": False,
-            }
-            try:
-                data = self._json_request(
-                    "https://api.tavily.com/search",
-                    payload,
-                    headers={"Authorization": f"Bearer {self.settings.tavily_api_key}"},
-                    timeout=20,
-                )
-            except Exception as error:
-                return DiscoveryResult("tavily", True, queries, indexed, skipped, f"Tavily lỗi: {error}", sources)
-            for item in data.get("results", []):
-                url = str(item.get("url") or "").strip()
-                if not url or url in seen_urls:
-                    skipped += 1
-                    continue
-                seen_urls.add(url)
-                title = str(item.get("title") or url).strip()[:220]
-                content = str(item.get("raw_content") or item.get("content") or "").strip()
-                if count_words(content) < 40:
-                    skipped += 1
-                    continue
-                try:
-                    source_id = self.storage.upsert_source(
-                        url=url,
-                        canonical_url=url,
-                        title=title,
-                        text_content=content,
-                        source_type="web-auto",
-                        metadata={"provider": "tavily", "query": query},
-                        organization_id=organization_id,
-                    )
-                    indexed += 1
-                    sources.append({"id": source_id, "title": title, "url": url})
-                except Exception:
-                    skipped += 1
-        message = f"Đã tìm và lập chỉ mục {indexed} nguồn web công khai qua Tavily." if indexed else "Tavily không trả về nguồn đủ nội dung để lập chỉ mục."
-        return DiscoveryResult("tavily", True, queries, indexed, skipped, message, sources)
+            },
+            headers={"Authorization": f"Bearer {self.settings.tavily_api_key}"},
+            timeout=20,
+        )
 
-    def _brave(self, queries: list[str], *, organization_id: int | None, max_results: int) -> DiscoveryResult:
-        indexed = 0
-        skipped = 0
-        sources: list[dict[str, Any]] = []
-        seen_urls: set[str] = set()
-        for query in queries:
-            url = f"https://api.search.brave.com/res/v1/web/search?q={self._quote(query)}&count={max(1, min(10, max_results))}"
-            try:
-                data = self._get_json(url, headers={"X-Subscription-Token": self.settings.brave_search_api_key}, timeout=15)
-            except Exception as error:
-                return DiscoveryResult("brave", True, queries, indexed, skipped, f"Brave lỗi: {error}", sources)
-            for item in (data.get("web") or {}).get("results", []):
-                page_url = str(item.get("url") or "").strip()
-                if not page_url or page_url in seen_urls:
-                    skipped += 1
-                    continue
-                seen_urls.add(page_url)
-                title = str(item.get("title") or page_url).strip()[:220]
-                content = " ".join([str(item.get("description") or ""), str(item.get("extra_snippets") or "")]).strip()
-                if count_words(content) < 18:
-                    skipped += 1
-                    continue
-                source_id = self.storage.upsert_source(
-                    url=page_url,
-                    canonical_url=page_url,
-                    title=title,
-                    text_content=content,
-                    source_type="web-search-snippet",
-                    metadata={"provider": "brave", "query": query},
-                    organization_id=organization_id,
-                )
-                indexed += 1
-                sources.append({"id": source_id, "title": title, "url": page_url})
-        message = f"Đã lập chỉ mục {indexed} kết quả/tóm tắt từ Brave. Nên dùng Tavily nếu muốn trích xuất nội dung đầy đủ hơn."
-        return DiscoveryResult("brave", True, queries, indexed, skipped, message, sources)
+    def _fetch_brave(self, query: str, max_results: int) -> dict[str, Any]:
+        return self._get_json(
+            f"https://api.search.brave.com/res/v1/web/search?q={quote_plus(query)}&count={max_results}",
+            headers={"X-Subscription-Token": self.settings.brave_search_api_key},
+            timeout=15,
+        )
+
+    def _index_candidate(
+        self,
+        *,
+        provider: str,
+        query: str,
+        canonical_url: str,
+        title: str,
+        content: str,
+        organization_id: int | None,
+        minimum_words: int,
+        seen_urls: set[str],
+    ) -> dict[str, Any] | None:
+        canonical_url = canonical_url.strip()
+        parsed = urlparse(canonical_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or canonical_url in seen_urls:
+            return None
+        seen_urls.add(canonical_url)
+        content = content.strip()[: self.settings.web_discovery_max_content_chars]
+        if count_words(content) < minimum_words:
+            return None
+        namespace = str(organization_id) if organization_id is not None else "public"
+        digest = hashlib.sha256(f"{namespace}:{canonical_url}".encode("utf-8")).hexdigest()[:32]
+        source_id = self.storage.upsert_source(
+            url=f"web-discovery://{namespace}/{digest}",
+            canonical_url=canonical_url,
+            title=(title.strip() or canonical_url)[:220],
+            text_content=content,
+            source_type=f"web-{provider}",
+            metadata={"provider": provider, "query": query, "canonicalUrl": canonical_url},
+            organization_id=organization_id,
+        )
+        return {"id": source_id, "title": (title.strip() or canonical_url)[:220], "url": canonical_url}
 
     @staticmethod
-    def _quote(value: str) -> str:
-        from urllib.parse import quote_plus
-        return quote_plus(value)
-
-    @staticmethod
-    def _json_request(url: str, payload: dict[str, Any], *, headers: dict[str, str], timeout: float) -> dict[str, Any]:
-        request = Request(url, method="POST", data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json", **headers})
+    def _json_request(
+        url: str,
+        payload: dict[str, Any],
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> dict[str, Any]:
+        request = Request(
+            url,
+            method="POST",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", **headers},
+        )
         with urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8") or "{}")
 

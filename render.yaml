@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: turnitin-web
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: MINH_CHUNG_PUBLIC_MODE
+        value: "1"
+      - key: MINH_CHUNG_DOCUMENT_MAX_BYTES
+        value: "250000000"
+      - key: MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES
+        value: "6"
+      - key: MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS
+        value: "10"
+      - key: MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS
+        value: "6"
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false

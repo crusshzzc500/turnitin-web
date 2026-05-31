@@ -711,7 +711,7 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_submission(self, submission_id: int, organization_id: int) -> dict[str, Any] | None:
+    def get_submission(self, submission_id: int, organization_id: int | None) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute(
                 """
@@ -723,7 +723,7 @@ class Storage:
             ).fetchone()
         return dict(row) if row else None
 
-    def delete_submission(self, submission_id: int, organization_id: int) -> bool:
+    def delete_submission(self, submission_id: int, organization_id: int | None) -> bool:
         with self.connect() as connection:
             submission = connection.execute(
                 "SELECT source_id FROM submissions WHERE id = ? AND organization_id = ?",

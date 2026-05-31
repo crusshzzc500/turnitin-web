@@ -1,4 +1,5 @@
-flask
-requests
-python-dotenv
-gunicorn
+pypdf
+python-docx
+reportlab
+pdf2image
+Pillow

@@ -17,15 +17,20 @@ Cách chạy thủ công:
 & 'C:\Users\Minh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' run.py
 ```
 
+Để deploy demo công khai lên Render, dùng [DEPLOY_RENDER.md](./DEPLOY_RENDER.md). File
+`render.yaml` bật public mode để khách không có quyền quản trị và máy chủ không lưu bài của khách.
+
 ## Đã có
 
-- Tải hoặc dán `.txt`, `.md`, `.docx`, `.pdf`.
+- Tải nguyên bài hoặc dán `.txt`, `.md`, `.docx`, `.pdf`; giới hạn mặc định `250 MB`.
+- Thanh tiến trình phần trăm khi đọc tệp, quét web, đối chiếu nguồn và hoàn thiện báo cáo.
 - Ba vai trò thử nghiệm `admin`, `instructor`, `student`; dữ liệu riêng được giới hạn theo tổ chức.
 - Kho nguồn SQLite và chỉ mục toàn văn FTS5.
 - Lưu lịch sử phiên bản nguồn bất biến khi nội dung website thay đổi.
 - Đoạn tô màu, tỷ lệ tương đồng, danh sách nguồn và lịch sử báo cáo phía server.
 - Xuất báo cáo PDF có thông tin tổ chức, điểm tương đồng, nguồn, đoạn đối chiếu và cảnh báo liêm chính.
 - PDF scan ít chữ tự thử OCR khi máy chủ có Tesseract và `pdf2image`.
+- Quét bổ sung nguồn web công khai qua Tavily hoặc Brave khi người dùng chủ động bật.
 - Bộ lọc trích dẫn, tài liệu tham khảo và độ dài tối thiểu.
 - Thêm nguồn riêng từ giao diện.
 - Kho bài nộp nội bộ chỉ lập chỉ mục khi người dùng đồng ý; có thao tác rút bài
@@ -51,6 +56,32 @@ kiến trúc phân tán mô tả trong [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 Danh sách API hiện có nằm trong [API.md](./API.md).
 
+## Tìm thêm nguồn web khi tạo báo cáo
+
+Tùy chọn **Quét thêm nguồn web công khai** mặc định tắt. Khi người dùng chủ động bật, hệ thống
+chọn tối đa `6` đoạn trích nổi bật và gửi truy vấn song song sang Tavily hoặc Brave. Mỗi truy vấn
+nhận tối đa `10` kết quả ứng viên, sau đó hệ thống lập chỉ mục nguồn phù hợp trong phạm vi tổ chức
+rồi mới chạy đối chiếu. Không gửi toàn bộ tài liệu và không trả API key về trình duyệt.
+
+Nguồn tìm được lưu bằng khóa nội bộ theo tổ chức, nên hai trường cùng tìm thấy một URL không ghi
+đè dữ liệu của nhau. Cấu hình một trong hai biến môi trường:
+
+```powershell
+$env:TAVILY_API_KEY = '...'
+$env:BRAVE_SEARCH_API_KEY = '...'
+```
+
+Tavily được ưu tiên nếu cả hai key cùng tồn tại. Có thể điều chỉnh giới hạn bằng
+`MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES`, `MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS` và
+`MINH_CHUNG_WEB_DISCOVERY_MAX_CONTENT_CHARS`. Số truy vấn đồng thời dùng
+`MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS`.
+
+## Chế độ demo công khai
+
+Đặt `MINH_CHUNG_PUBLIC_MODE=1` cho website mở tự do. Server sẽ ép mọi khách về quyền sinh viên,
+không tin header chọn vai trò từ client, khóa API quản trị và không lưu bài nộp hoặc báo cáo.
+Chế độ nội bộ mặc định vẫn giữ ba vai trò demo để phát triển và kiểm thử.
+
 ## OCR cho PDF scan
 
 OCR là lớp dự phòng tùy chọn. Máy chủ hiện vẫn đọc PDF có lớp văn bản bằng `pypdf` mà không cần
@@ -73,46 +104,3 @@ Kiểm tra trạng thái bằng `GET /api/ocr/status`.
 
 Minh Chứng hỗ trợ rà soát liêm chính học thuật. Tỷ lệ tương đồng không phải là
 kết luận tự động về đạo văn.
-
-## Nâng cấp bản dùng tự do + quét web công khai
-
-Bản này đã được chỉnh theo hướng ai cũng dùng được, không cần chọn tài khoản giáo viên/sinh viên. Mặc định hệ thống dùng người nội bộ `demo-admin` để backend hoạt động, nhưng giao diện không hiển thị phân quyền.
-
-### Quét web tự động như bản mô phỏng Turnitin
-
-Không thể quét “toàn bộ Internet” giống Turnitin thật vì Turnitin có kho dữ liệu thương mại riêng và quyền truy cập đặc biệt. Bản này dùng cách khả thi hơn:
-
-1. Lấy vài câu nổi bật trong bài.
-2. Gửi truy vấn qua API tìm kiếm web.
-3. Lập chỉ mục các nguồn công khai trả về.
-4. Chạy lại bộ so khớp để hiện nguồn và đoạn trùng.
-
-### Dịch vụ miễn phí nên dùng
-
-Ưu tiên Tavily vì có gói miễn phí, dễ lấy nội dung thô của trang và không cần thẻ ngân hàng ở gói miễn phí.
-
-Cách cấu hình trên Windows PowerShell:
-
-```powershell
-setx TAVILY_API_KEY "dán_key_của_bạn_vào_đây"
-```
-
-Sau đó đóng cửa sổ terminal, mở lại và chạy:
-
-```bash
-python run.py
-```
-
-Nếu muốn dùng Brave Search API:
-
-```powershell
-setx BRAVE_SEARCH_API_KEY "dán_key_của_bạn_vào_đây"
-```
-
-Lưu ý: nếu chưa cấu hình API key, nút “Quét nguồn web công khai tự động” vẫn hiện nhưng backend sẽ báo chưa cấu hình và chỉ đối chiếu với kho nguồn đang có.
-
-### Khuyến nghị sử dụng
-
-- Dùng Tavily cho bản miễn phí, học tập, demo lâu dài.
-- Không nên dùng Google Custom Search cho dự án mới vì API này không còn phù hợp cho khách hàng mới và có lộ trình dừng.
-- Không crawler ồ ạt nhiều website. Hãy tôn trọng robots.txt và điều khoản của từng trang.

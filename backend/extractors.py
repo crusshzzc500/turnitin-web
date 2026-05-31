@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,7 @@ def _extract_docx(filename: str, content: bytes) -> dict[str, Any]:
     except ImportError as error:
         raise UnsupportedDocumentError("Máy chủ chưa cài thư viện đọc DOCX.") from error
 
+    _validate_docx_archive(content)
     document = Document(io.BytesIO(content))
     paragraphs = [paragraph.text for paragraph in document.paragraphs]
     flags = scan_text("\n".join(paragraphs))
@@ -103,3 +105,13 @@ def _extract_docx(filename: str, content: bytes) -> dict[str, Any]:
         "paragraphs": len(paragraphs),
     }
     return {"text": "\n".join(paragraphs), "metadata": metadata, "integrityFlags": flags}
+
+
+def _validate_docx_archive(content: bytes, max_expanded_bytes: int = 1_000_000_000) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            expanded_bytes = sum(item.file_size for item in archive.infolist())
+    except zipfile.BadZipFile as error:
+        raise UnsupportedDocumentError("Tệp DOCX không hợp lệ.") from error
+    if expanded_bytes > max_expanded_bytes:
+        raise UnsupportedDocumentError("Tệp DOCX giải nén vượt quá giới hạn an toàn.")

@@ -8,6 +8,9 @@ API dùng header `X-Minh-Chung-User` để mô phỏng đăng nhập trong bản
 máy chủ dùng `demo-admin`. Ba tài khoản có sẵn là `demo-admin`, `demo-instructor` và
 `demo-student`. Đây là cơ chế demo, chưa thay thế đăng nhập thật bằng mật khẩu hoặc SSO.
 
+Khi `MINH_CHUNG_PUBLIC_MODE=1`, máy chủ bỏ qua header này, luôn dùng quyền sinh viên, không lưu
+bài hoặc báo cáo của khách và khóa API quản trị. Dùng public mode cho website mở tự do.
+
 | Phương thức | Đường dẫn | Mục đích |
 | --- | --- | --- |
 | `GET` | `/api/session/users` | Danh sách tài khoản demo để đổi vai trò trên giao diện. |
@@ -18,7 +21,7 @@ máy chủ dùng `demo-admin`. Ba tài khoản có sẵn là `demo-admin`, `demo
 
 | Phương thức | Đường dẫn | Mục đích |
 | --- | --- | --- |
-| `GET` | `/api/health` | Kiểm tra máy chủ đang hoạt động. |
+| `GET` | `/api/health` | Kiểm tra máy chủ và trạng thái cấu hình Tavily/Brave; không lộ API key. |
 | `GET` | `/api/ocr/status` | Kiểm tra OCR PDF scan có sẵn trên máy chủ hay không. |
 | `GET` | `/api/stats` | Số nguồn, đoạn chỉ mục, bài nộp, báo cáo và hàng đợi crawler. |
 | `GET` | `/api/sources?limit=100` | Danh sách nguồn đối chiếu. |
@@ -42,8 +45,11 @@ Ví dụ thêm nguồn:
 
 | Phương thức | Đường dẫn | Mục đích |
 | --- | --- | --- |
-| `POST` | `/api/analyze` | Phân tích văn bản JSON. |
-| `POST` | `/api/analyze-upload` | Đọc và phân tích tệp base64 `.txt`, `.md`, `.docx`, `.pdf`. |
+| `POST` | `/api/analysis-jobs` | Tạo job phân tích văn bản nền và nhận token theo dõi. |
+| `POST` | `/api/analysis-jobs/upload` | Tải nguyên tệp nhị phân `.txt`, `.md`, `.docx`, `.pdf` để tạo job nền. |
+| `GET` | `/api/analysis-jobs/{id}` | Xem phần trăm tiến trình bằng header `X-Minh-Chung-Job-Token`. |
+| `POST` | `/api/analyze` | Phân tích văn bản JSON đồng bộ để tương thích client cũ. |
+| `POST` | `/api/analyze-upload` | Đọc tệp base64 đồng bộ để tương thích client cũ. |
 
 Ví dụ phân tích:
 
@@ -52,6 +58,8 @@ Ví dụ phân tích:
   "text": "Nội dung bài viết...",
   "saveReport": true,
   "indexForComparison": false,
+  "enableWebSearch": false,
+  "webSearchMaxResults": 5,
   "settings": {
     "excludeQuotes": true,
     "excludeBibliography": true,
@@ -62,6 +70,16 @@ Ví dụ phân tích:
 
 `indexForComparison` mặc định là `false`. Chỉ đặt thành `true` sau khi người nộp
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.
+
+`enableWebSearch` cũng mặc định là `false`. Khi đặt thành `true`, tối đa `6` đoạn trích nổi bật
+được gửi song song sang Tavily hoặc Brave để tìm nguồn công khai. Mỗi truy vấn nhận tối đa `10`
+kết quả ứng viên. Nguồn phù hợp được lập chỉ mục riêng theo
+tổ chức trước khi chạy đối chiếu. Không dùng lựa chọn này cho tài liệu nhạy cảm nếu chưa có chính
+sách xử lý dữ liệu với nhà cung cấp tìm kiếm.
+
+Giới hạn upload mặc định là `250000000` byte và có thể đổi bằng
+`MINH_CHUNG_DOCUMENT_MAX_BYTES`. Client mới dùng endpoint tải nhị phân để không phải mã hóa cả
+tệp sang base64 trong trình duyệt.
 
 Nguồn thủ công, báo cáo và bài nộp nội bộ được giới hạn theo tổ chức. Sinh viên chỉ xem báo cáo
 và bài nộp của chính mình. Thêm nguồn cho phép `admin` và `instructor`; API crawler, reindex và

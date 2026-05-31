@@ -604,6 +604,11 @@ input[type="url"]:focus {
   background: var(--forest-dark);
 }
 
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .action-row {
   margin-top: 17px;
   padding-top: 16px;
@@ -655,6 +660,99 @@ input[type="url"]:focus {
   margin-top: 3px;
   font-size: 10px;
   line-height: 1.55;
+}
+
+.quick-options {
+  display: grid;
+  gap: 10px;
+  margin-top: 17px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.analysis-progress {
+  margin-top: 16px;
+  padding: 14px 15px;
+  border: 1px solid #c9ddd6;
+  border-radius: 12px;
+  background: #f4fbf8;
+}
+
+.analysis-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--forest);
+  font-size: 13px;
+}
+
+.analysis-progress-track {
+  height: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #d9e9e3;
+}
+
+.analysis-progress-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--forest), #55a48b);
+  transition: width 180ms ease;
+}
+
+.analysis-progress p {
+  margin: 8px 0 0;
+  color: #4e675f;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.option-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--muted);
+  background: #fff;
+  cursor: pointer;
+}
+
+.option-card input {
+  margin-top: 3px;
+  accent-color: var(--forest);
+}
+
+.option-card strong,
+.option-card small {
+  display: block;
+}
+
+.option-card strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.option-card small {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.web-search-option {
+  background: #f6faf6;
+}
+
+.web-discovery-hint {
+  max-width: 650px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .primary-button {
@@ -1476,6 +1574,7 @@ input[type="url"]:focus {
   }
 
   .source-adder-grid,
+  .quick-options,
   .report-summary {
     grid-template-columns: 1fr;
   }
@@ -1490,101 +1589,5 @@ input[type="url"]:focus {
 
   .document-preview {
     padding: 21px;
-  }
-}
-
-/* Friendly public-mode upgrade */
-.simple-mode-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.14), rgba(118, 75, 162, 0.12));
-  color: #394150;
-  font-weight: 800;
-  border: 1px solid rgba(102, 126, 234, 0.18);
-  white-space: nowrap;
-}
-
-.quick-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin: 18px 0 8px;
-}
-
-.option-card {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 16px;
-  border: 1px solid rgba(34, 40, 49, 0.08);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 14px 35px rgba(31, 41, 55, 0.08);
-  cursor: pointer;
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
-}
-
-.option-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 18px 42px rgba(31, 41, 55, 0.12);
-  border-color: rgba(102, 126, 234, 0.32);
-}
-
-.option-card input {
-  width: 20px;
-  height: 20px;
-  margin-top: 2px;
-  accent-color: #667eea;
-}
-
-.option-card strong {
-  display: block;
-  color: #1f2937;
-  font-size: 0.98rem;
-}
-
-.option-card small {
-  display: block;
-  margin-top: 4px;
-  line-height: 1.45;
-  color: #667085;
-}
-
-.highlight-option {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(255, 255, 255, 0.9));
-}
-
-.web-discovery-hint {
-  margin: 0;
-  color: #667085;
-  line-height: 1.5;
-  max-width: 560px;
-}
-
-.hero-card {
-  background:
-    radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.20), transparent 28%),
-    radial-gradient(circle at 10% 90%, rgba(255, 122, 89, 0.18), transparent 30%),
-    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,250,252,0.9));
-}
-
-.primary-button {
-  box-shadow: 0 14px 28px rgba(102, 126, 234, 0.24);
-}
-
-.match {
-  border-radius: 8px;
-  padding: 2px 4px;
-}
-
-@media (max-width: 860px) {
-  .quick-options {
-    grid-template-columns: 1fr;
-  }
-  .simple-mode-pill {
-    white-space: normal;
   }
 }

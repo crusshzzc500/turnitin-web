@@ -20,7 +20,7 @@
           <span class="brand-mark">M</span>
           <span>
             <strong>Minh Chứng</strong>
-            <small>Similarity checker</small>
+            <small>Integrity workspace</small>
           </span>
         </a>
 
@@ -64,8 +64,12 @@
             <h1 id="page-title">Kiểm tra tài liệu</h1>
           </div>
           <div class="topbar-actions">
-            <span class="simple-mode-pill">Dùng tự do · không cần tài khoản</span>
+            <label class="user-switcher">
+              <span>Vai trò thử nghiệm</span>
+              <select id="active-user"></select>
+            </label>
             <span id="backend-status" class="status-pill"><i></i> Đang kiểm tra máy chủ</span>
+            <button class="icon-button" type="button" aria-label="Thông báo">♢</button>
           </div>
         </header>
 
@@ -73,10 +77,11 @@
           <div class="intro-grid">
             <article class="hero-card">
               <div>
-                <p class="eyebrow">KIỂM TRA NHANH CHO HỌC TẬP</p>
-                <h2>Upload bài, quét nguồn,<br /><em>xem đoạn nào cần sửa.</em></h2>
+                <p class="eyebrow">BÁO CÁO GIẢI TRÌNH ĐƯỢC</p>
+                <h2>Đánh giá sự tương đồng,<br /><em>không chỉ là một con số.</em></h2>
                 <p>
-                  Giao diện đơn giản cho người lần đầu dùng: chọn tệp hoặc dán bài, bật quét web công khai nếu đã cấu hình API miễn phí, rồi xem báo cáo có màu đánh dấu rõ ràng.
+                  Xem rõ đoạn trùng, nguồn đối chiếu và lý do cần rà soát. Bộ lọc giúp
+                  loại trừ trích dẫn và danh mục tài liệu tham khảo.
                 </p>
               </div>
               <div class="hero-art" aria-hidden="true">
@@ -87,10 +92,11 @@
             </article>
 
             <article class="insight-card">
-              <span class="card-kicker">3 BƯỚC RẤT DỄ</span>
-              <h3>1. Chọn bài → 2. Bật quét web → 3. Đọc báo cáo.</h3>
+              <span class="card-kicker">GỢI Ý QUY TRÌNH</span>
+              <h3>Dùng kết quả để rà soát, không dùng để kết luận tự động.</h3>
               <p>
-                Kết quả là gợi ý rà soát. Một đoạn giống nguồn khác chưa chắc là đạo văn nếu bạn đã trích dẫn đúng.
+                Một đoạn trùng có thể là trích dẫn hợp lệ, mẫu biểu cố định hoặc nội dung
+                cần bổ sung nguồn.
               </p>
             </article>
           </div>
@@ -109,7 +115,7 @@
                 <input id="file-input" type="file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf" />
                 <span class="upload-mark">↑</span>
                 <strong>Thả tệp hoặc bấm để chọn</strong>
-                <small>Máy chủ đọc .txt, .md, .docx và .pdf, tối đa 10 MB</small>
+                <small id="upload-limit-label">Máy chủ đọc .txt, .md, .docx và .pdf, tối đa 250 MB</small>
               </label>
               <div class="paste-panel">
                 <label for="document-text">Hoặc dán nội dung vào đây</label>
@@ -125,25 +131,8 @@
               </div>
             </div>
 
-            <section class="quick-options">
-              <label class="option-card highlight-option">
-                <input id="enable-web-search" type="checkbox" checked />
-                <span>
-                  <strong>Quét nguồn web công khai tự động</strong>
-                  <small>Cần TAVILY_API_KEY hoặc BRAVE_SEARCH_API_KEY trong máy chủ. Không có key thì web vẫn chạy bằng kho sẵn có.</small>
-                </span>
-              </label>
-              <label class="option-card">
-                <input id="index-submission" type="checkbox" />
-                <span>
-                  <strong>Lưu bài này vào kho đối chiếu</strong>
-                  <small>Tùy chọn. Mặc định không lưu bài của bạn vào kho nội bộ.</small>
-                </span>
-              </label>
-            </section>
-
             <details id="source-adder" class="source-adder">
-              <summary>Thêm nguồn đối chiếu thủ công nếu cần</summary>
+              <summary>Thêm nguồn đối chiếu của riêng bạn</summary>
               <div class="source-adder-grid">
                 <input id="custom-source-name" type="text" placeholder="Tên nguồn, ví dụ: Nội quy khoa" />
                 <input id="custom-source-url" type="url" placeholder="Đường dẫn nguồn (không bắt buộc)" />
@@ -156,8 +145,36 @@
               </div>
             </details>
 
+            <section class="quick-options">
+              <label class="option-card web-search-option">
+                <input id="enable-web-search" type="checkbox" />
+                <span>
+                  <strong>Quét thêm nguồn web công khai</strong>
+                  <small>Tùy chọn. Khi bật, tối đa 6 đoạn trích nổi bật được quét song song qua Tavily hoặc Brave để tìm nhiều nguồn hơn. Mặc định: tắt.</small>
+                </span>
+              </label>
+              <label class="option-card">
+                <input id="index-submission" type="checkbox" />
+                <span>
+                  <strong>Đồng ý đưa bài vào kho nội bộ</strong>
+                  <small>Dùng làm nguồn đối chiếu cho những lần kiểm tra sau. Mặc định: không lưu vào kho nguồn.</small>
+                </span>
+              </label>
+            </section>
+
+            <section id="analysis-progress" class="analysis-progress" role="status" aria-live="polite" hidden>
+              <div class="analysis-progress-heading">
+                <strong id="analysis-progress-title">Đang chuẩn bị tài liệu</strong>
+                <span id="analysis-progress-value">0%</span>
+              </div>
+              <div class="analysis-progress-track" aria-hidden="true">
+                <i id="analysis-progress-bar"></i>
+              </div>
+              <p id="analysis-progress-message">Đang xếp tài liệu vào hàng xử lý.</p>
+            </section>
+
             <div class="action-row">
-              <p id="web-discovery-hint" class="web-discovery-hint">Mẹo: bật quét web khi kiểm tra bài dài hoặc bài lấy ý từ nhiều trang mạng.</p>
+              <p id="web-discovery-hint" class="web-discovery-hint">Quét web đang tắt để bảo vệ riêng tư. Bật khi bạn muốn tìm thêm nguồn công khai.</p>
               <button id="analyze-button" class="primary-button" type="button">
                 Tạo báo cáo tương đồng
                 <span>→</span>
@@ -286,12 +303,13 @@
         <section id="sources-view" class="view simple-view">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">KHO NGUỒN</p>
-              <h2>Nguồn web và nguồn thủ công</h2>
+              <p class="eyebrow">KHO DỮ LIỆU ĐỘC LẬP</p>
+              <h2>Nguồn đang đối chiếu</h2>
             </div>
           </div>
           <p class="view-description">
-            Hệ thống có thể tự tìm nguồn web công khai qua API tìm kiếm miễn phí rồi lập chỉ mục để đối chiếu. Crawler thủ công vẫn tôn trọng robots.txt, giới hạn tốc độ và chặn mạng nội bộ.
+            Kho nguồn tự xây dựng tăng dần từ nội dung được thêm thủ công và website công khai
+            cho phép thu thập. Crawler tôn trọng robots.txt, giới hạn tốc độ và chặn mạng nội bộ.
           </p>
           <div class="platform-stats">
             <article><span>Nguồn đã lập chỉ mục</span><strong id="platform-sources">0</strong></article>

@@ -10,7 +10,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .analysis import SimilarityAnalyzer
 from .auth import AuthenticationError, AuthorizationError, Principal, principal_from_user
@@ -18,6 +18,7 @@ from .config import Settings
 from .crawler import CrawlPolicyError, CrawlRunner, Crawler
 from .demo_data import seed_demo_sources
 from .extractors import UnsupportedDocumentError, extract_document
+from .jobs import AnalysisJobManager, ProgressCallback
 from .ocr import ocr_status
 from .pdf_report import build_report_pdf
 from .search import SearchBackend, create_search_backend
@@ -35,6 +36,7 @@ class AppContext:
     crawl_runner: CrawlRunner
     search_backend: SearchBackend
     web_discovery: WebDiscovery
+    analysis_jobs: AnalysisJobManager
 
     @classmethod
     def create(cls, settings: Settings) -> "AppContext":
@@ -52,6 +54,10 @@ class AppContext:
             crawl_runner=CrawlRunner(crawler),
             search_backend=search_backend,
             web_discovery=WebDiscovery(settings, storage),
+            analysis_jobs=AnalysisJobManager(
+                max_workers=settings.analysis_job_workers,
+                ttl_seconds=settings.analysis_job_ttl_seconds,
+            ),
         )
 
 
@@ -89,13 +95,19 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             principal = self._principal()
             parts = [part for part in parsed.path.split("/") if part]
             if len(parts) == 3 and parts[:2] == ["api", "submissions"]:
-                submission = self.context.storage.get_submission(int(parts[2]), principal.organization_id)
+                submission = self.context.storage.get_submission(
+                    int(parts[2]),
+                    self._organization_scope(principal),
+                )
                 if not submission:
                     self._send_json({"error": "Không tìm thấy bài nộp."}, HTTPStatus.NOT_FOUND)
                     return
                 if principal.role == "student" and int(submission["user_id"]) != principal.id:
                     raise AuthorizationError("Bạn chỉ có thể rút bài nộp của chính mình.")
-                deleted = self.context.storage.delete_submission(int(parts[2]), principal.organization_id)
+                deleted = self.context.storage.delete_submission(
+                    int(parts[2]),
+                    self._organization_scope(principal),
+                )
                 if not deleted:
                     self._send_json({"error": "Không tìm thấy bài nộp."}, HTTPStatus.NOT_FOUND)
                     return
@@ -119,31 +131,51 @@ class AppRequestHandler(BaseHTTPRequestHandler):
     def _handle_get(self) -> None:
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        parts = [part for part in parsed.path.split("/") if part]
         if parsed.path == "/api/health":
             self._send_json(
                 {
                     "ok": True,
                     "service": "minh-chung",
                     "searchBackend": self.context.search_backend.name,
-                    "webDiscovery": {
-                        "tavily": bool(self.context.settings.tavily_api_key),
-                        "brave": bool(self.context.settings.brave_search_api_key),
+                    "webDiscovery": self.context.web_discovery.status(),
+                    "publicMode": self.context.settings.public_mode,
+                    "documentMaxBytes": self.context.settings.document_max_bytes,
+                    "webDiscoveryLimits": {
+                        "queries": self.context.settings.web_discovery_max_queries,
+                        "resultsPerQuery": self.context.settings.web_discovery_max_results,
+                        "parallelWorkers": self.context.settings.web_discovery_parallel_workers,
                     },
                 }
             )
             return
         if parsed.path == "/api/session/users":
-            self._send_json({"users": self.context.storage.list_users()})
+            users = (
+                [self.context.storage.get_user("demo-student")]
+                if self.context.settings.public_mode
+                else self.context.storage.list_users()
+            )
+            self._send_json({"users": [user for user in users if user]})
             return
         principal = self._principal()
         if parsed.path == "/api/session":
             self._send_json({"user": self._principal_payload(principal)})
             return
+        if len(parts) == 3 and parts[:2] == ["api", "analysis-jobs"]:
+            job = self.context.analysis_jobs.get(
+                parts[2],
+                self.headers.get("X-Minh-Chung-Job-Token", ""),
+            )
+            if not job:
+                self._send_json({"error": "Không tìm thấy tiến trình phân tích."}, HTTPStatus.NOT_FOUND)
+                return
+            self._send_json(job)
+            return
         if parsed.path == "/api/ocr/status":
             self._send_json(ocr_status())
             return
         if parsed.path == "/api/stats":
-            stats = self.context.storage.stats(principal.organization_id)
+            stats = self.context.storage.stats(self._organization_scope(principal))
             if principal.role != "admin":
                 stats["crawl_queue"] = {}
             self._send_json({**stats, "crawler": self.context.crawl_runner.status() if principal.role == "admin" else {}})
@@ -153,19 +185,18 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 {
                     "sources": self.context.storage.list_sources(
                         self._query_limit(query),
-                        principal.organization_id,
+                        self._organization_scope(principal),
                     )
                 }
             )
             return
-        parts = [part for part in parsed.path.split("/") if part]
         if len(parts) == 4 and parts[:2] == ["api", "sources"] and parts[3] == "versions":
             self._send_json(
                 {
                     "versions": self.context.storage.list_source_versions(
                         int(parts[2]),
                         self._query_limit(query, 50),
-                        principal.organization_id,
+                        self._organization_scope(principal),
                     )
                 }
             )
@@ -175,7 +206,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 {
                     "reports": self.context.storage.list_reports(
                         self._query_limit(query, 20),
-                        principal.organization_id,
+                        self._organization_scope(principal),
                         principal.id if principal.role == "student" else None,
                     )
                 }
@@ -184,7 +215,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[:2] == ["api", "reports"] and parts[3] == "pdf":
             report = self.context.storage.get_report(
                 int(parts[2]),
-                principal.organization_id,
+                self._organization_scope(principal),
                 principal.id if principal.role == "student" else None,
             )
             if not report:
@@ -203,7 +234,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 {
                     "submissions": self.context.storage.list_submissions(
                         self._query_limit(query, 100),
-                        principal.organization_id,
+                        self._organization_scope(principal),
                         principal.id if principal.role == "student" else None,
                     )
                 }
@@ -240,8 +271,15 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_post(self) -> None:
         parsed = urlparse(self.path)
-        payload = self._read_json()
         principal = self._principal()
+        if parsed.path == "/api/analysis-jobs/upload":
+            self._create_upload_analysis_job(principal)
+            return
+
+        payload = self._read_json()
+        if parsed.path == "/api/analysis-jobs":
+            self._create_analysis_job(payload, principal)
+            return
         if parsed.path == "/api/analyze":
             self._analyze_text(payload, principal)
             return
@@ -274,29 +312,61 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"error": "Không tìm thấy API."}, HTTPStatus.NOT_FOUND)
 
+    def _create_analysis_job(self, payload: dict[str, Any], principal: Principal) -> None:
+        kind = str(payload.get("kind", "text"))
+        if kind == "text":
+            work = lambda progress: self._build_text_analysis(payload, principal, progress)
+        elif kind == "upload":
+            work = lambda progress: self._build_upload_analysis(payload, principal, progress)
+        else:
+            raise ValueError("Loại tiến trình phân tích không hợp lệ.")
+        self._send_json(self.context.analysis_jobs.create(work), HTTPStatus.ACCEPTED)
+
+    def _create_upload_analysis_job(self, principal: Principal) -> None:
+        filename = unquote(self.headers.get("X-Minh-Chung-Filename", "document.docx"))
+        content = self._read_bytes()
+        payload = {
+            "enableWebSearch": self.headers.get("X-Minh-Chung-Enable-Web-Search", "0") == "1",
+            "webSearchMaxResults": self.headers.get("X-Minh-Chung-Web-Search-Max-Results", "10"),
+            "saveReport": self.headers.get("X-Minh-Chung-Save-Report", "1") == "1",
+            "indexForComparison": self.headers.get("X-Minh-Chung-Index-Submission", "0") == "1",
+        }
+        work = lambda progress: self._build_upload_bytes_analysis(
+            filename,
+            content,
+            payload,
+            principal,
+            progress,
+        )
+        self._send_json(self.context.analysis_jobs.create(work), HTTPStatus.ACCEPTED)
+
     def _analyze_text(self, payload: dict[str, Any], principal: Principal) -> None:
+        self._send_json(self._build_text_analysis(payload, principal))
+
+    def _build_text_analysis(
+        self,
+        payload: dict[str, Any],
+        principal: Principal,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
         text = str(payload.get("text", "")).strip()
         if count_words(text) < 20:
             raise ValueError("Tài liệu cần có ít nhất 20 từ.")
         settings = payload.get("settings") or {}
-        web_discovery = None
-        if bool(payload.get("enableWebSearch", False)):
-            web_discovery = self.context.web_discovery.discover_and_index(
-                text,
-                organization_id=principal.organization_id,
-                max_results=max(1, min(8, int(payload.get("webSearchMaxResults", 5)))),
-            )
+        self._progress(progress, 12, "extracting", "Đã đọc nội dung tài liệu.")
+        web_discovery = self._discover_web_sources(payload, text, principal, progress)
+        self._progress(progress, 76, "matching", "Đang đối chiếu với kho nguồn.")
         result = self.context.analyzer.analyze(
             text,
             minimum_words=max(4, min(30, int(settings.get("minimumWords", 8)))),
             exclude_quotes=bool(settings.get("excludeQuotes", True)),
             exclude_bibliography=bool(settings.get("excludeBibliography", True)),
-            organization_id=principal.organization_id,
+            organization_id=self._organization_scope(principal),
         )
         title = next((line.strip() for line in text.splitlines() if line.strip()), "Tài liệu không tên")
         if web_discovery is not None:
             result["webDiscovery"] = web_discovery
-        if bool(payload.get("indexForComparison", False)):
+        if bool(payload.get("indexForComparison", False)) and not self.context.settings.public_mode:
             result["submissionId"] = self.context.storage.create_submission(
                 title=title[:180],
                 text_content=text,
@@ -305,7 +375,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 organization_id=principal.organization_id,
                 user_id=principal.id,
             )
-        if bool(payload.get("saveReport", True)):
+        if bool(payload.get("saveReport", True)) and not self.context.settings.public_mode:
             result["reportId"] = self.context.storage.save_report(
                 title[:180],
                 text,
@@ -313,10 +383,20 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 organization_id=principal.organization_id,
                 user_id=principal.id,
             )
+        self._add_public_retention_notice(result)
         self._audit(principal, "report.analyze", "report", result.get("reportId"))
-        self._send_json(result)
+        self._progress(progress, 96, "finalizing", "Đang hoàn thiện báo cáo.")
+        return result
 
     def _analyze_upload(self, payload: dict[str, Any], principal: Principal) -> None:
+        self._send_json(self._build_upload_analysis(payload, principal))
+
+    def _build_upload_analysis(
+        self,
+        payload: dict[str, Any],
+        principal: Principal,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
         filename = str(payload.get("filename", "")).strip()
         encoded = str(payload.get("contentBase64", ""))
         if not filename or not encoded:
@@ -327,23 +407,30 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("Nội dung tệp không đúng định dạng base64.") from error
         if len(content) > self.context.settings.document_max_bytes:
             raise ValueError("Tệp vượt quá giới hạn dung lượng.")
+        return self._build_upload_bytes_analysis(filename, content, payload, principal, progress)
+
+    def _build_upload_bytes_analysis(
+        self,
+        filename: str,
+        content: bytes,
+        payload: dict[str, Any],
+        principal: Principal,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        self._progress(progress, 8, "extracting", "Đang đọc nội dung tệp.")
         extracted = extract_document(filename, content)
         text = extracted["text"].strip()
         if count_words(text) < 20:
             raise ValueError("Không đọc được đủ nội dung văn bản từ tệp.")
-        web_discovery = None
-        if bool(payload.get("enableWebSearch", False)):
-            web_discovery = self.context.web_discovery.discover_and_index(
-                text,
-                organization_id=principal.organization_id,
-                max_results=max(1, min(8, int(payload.get("webSearchMaxResults", 5)))),
-            )
-        result = self.context.analyzer.analyze(text, organization_id=principal.organization_id)
+        self._progress(progress, 18, "extracting", "Đã trích xuất nội dung tệp.")
+        web_discovery = self._discover_web_sources(payload, text, principal, progress)
+        self._progress(progress, 76, "matching", "Đang đối chiếu với kho nguồn.")
+        result = self.context.analyzer.analyze(text, organization_id=self._organization_scope(principal))
         if web_discovery is not None:
             result["webDiscovery"] = web_discovery
         result["documentMetadata"] = extracted["metadata"]
         result["integrityFlags"] = extracted["integrityFlags"]
-        if bool(payload.get("indexForComparison", False)):
+        if bool(payload.get("indexForComparison", False)) and not self.context.settings.public_mode:
             result["submissionId"] = self.context.storage.create_submission(
                 title=filename[:180],
                 text_content=text,
@@ -352,7 +439,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 organization_id=principal.organization_id,
                 user_id=principal.id,
             )
-        if bool(payload.get("saveReport", True)):
+        if bool(payload.get("saveReport", True)) and not self.context.settings.public_mode:
             result["reportId"] = self.context.storage.save_report(
                 filename[:180],
                 text,
@@ -360,8 +447,51 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 organization_id=principal.organization_id,
                 user_id=principal.id,
             )
+        self._add_public_retention_notice(result)
         self._audit(principal, "report.analyze_upload", "report", result.get("reportId"))
-        self._send_json(result)
+        self._progress(progress, 96, "finalizing", "Đang hoàn thiện báo cáo.")
+        return result
+
+    def _discover_web_sources(
+        self,
+        payload: dict[str, Any],
+        text: str,
+        principal: Principal,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, Any] | None:
+        if not bool(payload.get("enableWebSearch", False)):
+            self._progress(progress, 42, "web_discovery", "Bỏ qua quét web theo lựa chọn của bạn.")
+            return None
+        self._progress(progress, 22, "web_discovery", "Đang quét song song các nguồn web công khai.")
+        result = self.context.web_discovery.discover_and_index(
+            text,
+            organization_id=self._organization_scope(principal),
+            max_results=max(1, min(20, int(payload.get("webSearchMaxResults", 10)))),
+            progress_callback=lambda completed, total, indexed: self._progress(
+                progress,
+                22 + round((completed / max(1, total)) * 50),
+                "web_discovery",
+                f"Đã quét {completed}/{total} truy vấn web, tìm thấy {indexed} nguồn phù hợp.",
+            ),
+        )
+        self._audit(
+            principal,
+            "web_discovery.search",
+            "source",
+            details={
+                "provider": result["provider"],
+                "indexed": result["indexed"],
+                "skipped": result["skipped"],
+                "queryCount": len(result["queries"]),
+                "externalProcessing": result["externalProcessing"],
+            },
+        )
+        return result
+
+    @staticmethod
+    def _progress(callback: ProgressCallback | None, value: int, phase: str, message: str) -> None:
+        if callback:
+            callback(value, phase, message)
 
     def _add_source(self, payload: dict[str, Any], principal: Principal) -> None:
         title = str(payload.get("title", "")).strip()
@@ -432,11 +562,25 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True, "backend": self.context.search_backend.name, **result})
 
     def _principal(self) -> Principal:
-        username = self.headers.get("X-Minh-Chung-User", "demo-admin").strip()
+        username = (
+            "demo-student"
+            if self.context.settings.public_mode
+            else self.headers.get("X-Minh-Chung-User", "demo-admin").strip()
+        )
         user = self.context.storage.get_user(username)
         if not user:
             raise AuthenticationError("Không nhận diện được người dùng.")
         return principal_from_user(user)
+
+    def _organization_scope(self, principal: Principal) -> int | None:
+        return None if self.context.settings.public_mode else principal.organization_id
+
+    def _add_public_retention_notice(self, result: dict[str, Any]) -> None:
+        if self.context.settings.public_mode:
+            result["dataRetention"] = {
+                "stored": False,
+                "message": "Chế độ công khai không lưu bài nộp hoặc báo cáo trên máy chủ.",
+            }
 
     @staticmethod
     def _principal_payload(principal: Principal) -> dict[str, Any]:
@@ -484,6 +628,14 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             raise ValueError("Dữ liệu JSON cần là một đối tượng.")
         return payload
+
+    def _read_bytes(self) -> bytes:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            raise ValueError("Tệp tải lên đang trống.")
+        if length > self.context.settings.document_max_bytes:
+            raise ValueError("Tệp vượt quá giới hạn dung lượng.")
+        return self.rfile.read(length)
 
     def _serve_static(self, request_path: str) -> None:
         relative = "index.html" if request_path in {"", "/"} else request_path.lstrip("/")

@@ -13,12 +13,18 @@ Phiên bản hiện tại là nền móng chạy thật trên một máy:
   giới hạn dung lượng trang, chỉ đi tiếp trong cùng tên miền theo mặc định và
   chặn truy cập mạng nội bộ. Lỗi tạm thời được retry với backoff và giới hạn số
   lần thử.
-- Đọc `.txt`, `.md`, `.docx`, `.pdf`.
+- Đọc nguyên tệp `.txt`, `.md`, `.docx`, `.pdf` với giới hạn mặc định `250 MB` và kiểm tra
+  kích thước giải nén DOCX.
+- Job phân tích nền có token riêng và phần trăm tiến trình cho giao diện public.
 - PDF scan ít chữ có OCR fallback tùy chọn qua Tesseract và endpoint kiểm tra trạng thái.
+- WebDiscovery tùy chọn qua Tavily hoặc Brave: trích tối đa `6` câu, quét truy vấn song song,
+  giới hạn kích thước nội dung và lưu nguồn theo namespace tổ chức.
 - Quét ký tự vô hình, bảng chữ cái trộn lẫn và định dạng DOCX đáng ngờ.
 - Kho bài nộp nội bộ chỉ lập chỉ mục khi người dùng đồng ý và cho phép rút bài
   khỏi kho đối chiếu.
 - Không gian dữ liệu theo tổ chức, ba vai trò demo và nhật ký kiểm toán cho thao tác quan trọng.
+- Public mode cho demo Render: khóa header giả lập admin, không lưu tài liệu khách và ẩn thao tác
+  quản trị. Đây là lớp bảo vệ demo, không thay thế đăng nhập production.
 - Xuất PDF báo cáo từ dữ liệu đã lưu trong phạm vi tổ chức.
 
 SQLite phù hợp cho phát triển, trình diễn và thử nghiệm với một đơn vị nhỏ. Nó
@@ -85,6 +91,8 @@ flowchart LR
 5. Lưu ngày thu thập, nguồn, giấy phép, ngôn ngữ và trạng thái gỡ dữ liệu.
 6. Lập chỉ mục chính xác và gần đúng; đánh giá chất lượng trên bộ dữ liệu tiếng
    Việt có nhãn.
+7. Tách WebDiscovery dùng lúc tạo báo cáo khỏi corpus crawler dài hạn; theo dõi quota, thời gian
+   đáp ứng và điều khoản xử lý dữ liệu của nhà cung cấp.
 
 ## Các lớp sản phẩm còn cần tiếp tục xây
 

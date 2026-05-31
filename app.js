@@ -53,11 +53,13 @@ const state = {
   report: null,
   backendAvailable: false,
   pendingFile: null,
+  analysisJob: null,
   platformStats: null,
   serverHistory: [],
   submissions: [],
   searchStatus: null,
-  currentUsername: "demo-admin",
+  health: null,
+  currentUsername: localStorage.getItem("minh-chung-user") || "demo-admin",
   session: null,
   users: []
 };
@@ -65,16 +67,24 @@ const state = {
 const elements = {
   pageTitle: document.querySelector("#page-title"),
   activeUser: document.querySelector("#active-user"),
+  userSwitcher: document.querySelector(".user-switcher"),
   enableWebSearch: document.querySelector("#enable-web-search"),
   webDiscoveryHint: document.querySelector("#web-discovery-hint"),
   backendStatus: document.querySelector("#backend-status"),
   documentText: document.querySelector("#document-text"),
   fileInput: document.querySelector("#file-input"),
   fileLabel: document.querySelector("#file-label"),
+  uploadLimitLabel: document.querySelector("#upload-limit-label"),
   wordCounter: document.querySelector("#word-counter"),
   analyzeButton: document.querySelector("#analyze-button"),
+  analysisProgress: document.querySelector("#analysis-progress"),
+  analysisProgressTitle: document.querySelector("#analysis-progress-title"),
+  analysisProgressValue: document.querySelector("#analysis-progress-value"),
+  analysisProgressBar: document.querySelector("#analysis-progress-bar"),
+  analysisProgressMessage: document.querySelector("#analysis-progress-message"),
   downloadReportPdf: document.querySelector("#download-report-pdf"),
   indexSubmission: document.querySelector("#index-submission"),
+  indexSubmissionOption: document.querySelector("#index-submission").closest(".option-card"),
   loadSample: document.querySelector("#load-sample"),
   customSourceName: document.querySelector("#custom-source-name"),
   customSourceUrl: document.querySelector("#custom-source-url"),
@@ -150,46 +160,142 @@ function countWords(value) {
 
 async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       "X-Minh-Chung-User": state.currentUsername,
       ...(options.headers || {})
-    },
-    ...options
+    }
   });
-
-  const text = await response.text();
-  let payload = {};
-
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch (error) {
-    throw new Error(
-      `Máy chủ trả về dữ liệu không hợp lệ từ ${path}: ${text.substring(0, 160)}`
-    );
-  }
-
+  const payload = await response.json();
   if (!response.ok) {
-    throw new Error(
-      payload.error || `Máy chủ không thể xử lý yêu cầu (${path}).`
-    );
+    throw new Error(payload.error || "Máy chủ không thể xử lý yêu cầu.");
   }
-
   return payload;
 }
+
+function maxUploadBytes() {
+  return Number(state.health?.documentMaxBytes || 250 * 1024 * 1024);
+}
+
+function uploadLimitMegabytes() {
+  return Math.floor(maxUploadBytes() / 1_000_000);
+}
+
+function updateUploadLimit() {
+  elements.uploadLimitLabel.textContent =
+    `Máy chủ đọc .txt, .md, .docx và .pdf, tối đa ${uploadLimitMegabytes()} MB`;
+}
+
+function setAnalysisProgress(job = {}, visible = true) {
+  const value = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  const titles = {
+    queued: "Đang xếp hàng xử lý",
+    preparing: "Đang chuẩn bị tài liệu",
+    extracting: "Đang đọc nội dung tài liệu",
+    web_discovery: "Đang quét nguồn web công khai",
+    matching: "Đang đối chiếu nguồn",
+    finalizing: "Đang hoàn thiện báo cáo",
+    completed: "Đã hoàn tất báo cáo",
+    failed: "Không thể hoàn tất báo cáo"
+  };
+  elements.analysisProgress.hidden = !visible;
+  elements.analysisProgressTitle.textContent = titles[job.phase] || "Đang xử lý tài liệu";
+  elements.analysisProgressValue.textContent = `${value}%`;
+  elements.analysisProgressBar.style.width = `${value}%`;
+  elements.analysisProgressMessage.textContent = job.message || "Đang chuẩn bị tài liệu.";
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function pollAnalysisJob(job) {
+  state.analysisJob = job;
+  setAnalysisProgress(job);
+  while (true) {
+    const status = await apiRequest(`/api/analysis-jobs/${job.jobId}`, {
+      headers: { "X-Minh-Chung-Job-Token": job.jobToken }
+    });
+    setAnalysisProgress(status);
+    if (status.status === "completed") {
+      state.analysisJob = null;
+      return status.result;
+    }
+    if (status.status === "failed") {
+      state.analysisJob = null;
+      throw new Error(status.error || status.message || "Không thể hoàn tất báo cáo.");
+    }
+    await sleep(240);
+  }
+}
+
+async function createTextAnalysisJob(text) {
+  return apiRequest("/api/analysis-jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      kind: "text",
+      text,
+      saveReport: true,
+      indexForComparison: elements.indexSubmission.checked,
+      enableWebSearch: elements.enableWebSearch.checked,
+      webSearchMaxResults: 10,
+      settings: {
+        excludeQuotes: elements.filterQuotes.checked,
+        excludeBibliography: elements.filterBibliography.checked,
+        minimumWords: Number(elements.filterMinimum.value)
+      }
+    })
+  });
+}
+
+async function createUploadAnalysisJob(file) {
+  const response = await fetch("/api/analysis-jobs/upload", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-Minh-Chung-User": state.currentUsername,
+      "X-Minh-Chung-Filename": encodeURIComponent(file.name),
+      "X-Minh-Chung-Enable-Web-Search": elements.enableWebSearch.checked ? "1" : "0",
+      "X-Minh-Chung-Web-Search-Max-Results": "10",
+      "X-Minh-Chung-Save-Report": "1",
+      "X-Minh-Chung-Index-Submission": elements.indexSubmission.checked ? "1" : "0"
+    },
+    body: file
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Máy chủ không thể nhận tệp.");
+  }
+  return payload;
+}
+
 function permissions() {
   return state.session?.permissions || {};
 }
 
 function applySessionUI() {
-  elements.sourceAdder.hidden = false;
-  elements.crawlerCard.hidden = false;
-  elements.operationsCard.hidden = false;
-  elements.auditCard.hidden = true;
+  const access = permissions();
+  const publicMode = Boolean(state.health?.publicMode);
+  const maxQueries = Number(state.health?.webDiscoveryLimits?.queries || 6);
+  updateUploadLimit();
+  elements.sourceAdder.hidden = !access.manageSources;
+  elements.crawlerCard.hidden = !access.manageCrawler;
+  elements.operationsCard.hidden = !access.manageCrawler;
+  elements.auditCard.hidden = !access.viewAudit;
+  elements.userSwitcher.hidden = publicMode;
+  elements.indexSubmissionOption.hidden = publicMode;
+  if (publicMode) elements.indexSubmission.checked = false;
   elements.downloadReportPdf.hidden = !state.backendAvailable || !state.report?.reportId;
-  if (elements.webDiscoveryHint && state.report?.webDiscovery) {
-    elements.webDiscoveryHint.textContent = state.report.webDiscovery.message;
-  }
+  const providers = state.health?.webDiscovery || {};
+  const discoveryMessage = state.report?.webDiscovery?.message || (
+    providers.tavily || providers.brave
+      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống quét song song tối đa ${maxQueries} đoạn trích qua nhà cung cấp tìm kiếm.`
+      : "Chưa cấu hình Tavily hoặc Brave. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
+  );
+  elements.webDiscoveryHint.textContent = publicMode
+    ? `Chế độ công khai không lưu bài hoặc báo cáo trên máy chủ. ${discoveryMessage}`
+    : discoveryMessage;
 }
 
 function renderAuditEvents(events = []) {
@@ -213,15 +319,6 @@ function renderAuditEvents(events = []) {
         </article>`
     )
     .join("");
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1]);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 function splitSentences(value) {
@@ -465,6 +562,7 @@ async function refreshReport({ saveReport = false } = {}) {
     return;
   }
 
+  const previousWebDiscovery = state.report?.webDiscovery;
   state.report = await apiRequest("/api/analyze", {
     method: "POST",
     body: JSON.stringify({
@@ -477,6 +575,9 @@ async function refreshReport({ saveReport = false } = {}) {
       }
     })
   });
+  if (previousWebDiscovery && !state.report.webDiscovery) {
+    state.report.webDiscovery = previousWebDiscovery;
+  }
   renderReport();
 }
 
@@ -664,9 +765,9 @@ async function refreshBackendData() {
     apiRequest("/api/sources?limit=200"),
     apiRequest("/api/reports?limit=30"),
     apiRequest("/api/submissions?limit=100"),
-    apiRequest("/api/crawl/operations?limit=30"),
+    access.manageCrawler ? apiRequest("/api/crawl/operations?limit=30") : Promise.resolve({}),
     apiRequest("/api/search/status"),
-    Promise.resolve({ events: [] })
+    access.viewAudit ? apiRequest("/api/audit?limit=30") : Promise.resolve({ events: [] })
   ]);
   state.platformStats = stats;
   state.sources = sourcePayload.sources;
@@ -683,8 +784,20 @@ async function refreshBackendData() {
 }
 
 async function loadSession() {
+  const userPayload = await apiRequest("/api/session/users");
+  state.users = userPayload.users;
+  if (!state.users.some((user) => user.username === state.currentUsername)) {
+    state.currentUsername = state.users[0]?.username || "demo-admin";
+    localStorage.setItem("minh-chung-user", state.currentUsername);
+  }
   const sessionPayload = await apiRequest("/api/session");
   state.session = sessionPayload.user;
+  elements.activeUser.innerHTML = state.users
+    .map(
+      (user) => `<option value="${escapeHtml(user.username)}">${escapeHtml(user.display_name)} · ${escapeHtml(user.role)}</option>`
+    )
+    .join("");
+  elements.activeUser.value = state.currentUsername;
   applySessionUI();
 }
 
@@ -696,7 +809,7 @@ async function initializeBackend() {
     return;
   }
   try {
-    await apiRequest("/api/health");
+    state.health = await apiRequest("/api/health");
     state.backendAvailable = true;
     elements.backendStatus.classList.remove("offline");
     elements.backendStatus.lastChild.textContent = " Máy chủ và chỉ mục sẵn sàng";
@@ -710,9 +823,19 @@ async function initializeBackend() {
   }
 }
 
-if (elements.activeUser) {
-  elements.activeUser.addEventListener("change", async () => {});
-}
+elements.activeUser.addEventListener("change", async () => {
+  state.currentUsername = elements.activeUser.value;
+  localStorage.setItem("minh-chung-user", state.currentUsername);
+  state.report = null;
+  applySessionUI();
+  try {
+    await loadSession();
+    await refreshBackendData();
+    showToast(`Đã chuyển sang ${state.session.displayName}.`);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
 
 elements.downloadReportPdf.addEventListener("click", async () => {
   if (!state.backendAvailable || !state.report?.reportId) return;
@@ -744,8 +867,8 @@ elements.documentText.addEventListener("input", () => {
 elements.fileInput.addEventListener("change", async (event) => {
   const [file] = event.target.files;
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
-    showToast("Tệp vượt quá giới hạn 10 MB.");
+  if (file.size > maxUploadBytes()) {
+    showToast(`Tệp vượt quá giới hạn ${uploadLimitMegabytes()} MB.`);
     return;
   }
   if (/(\.docx|\.pdf)$/iu.test(file.name)) {
@@ -822,38 +945,17 @@ elements.analyzeButton.addEventListener("click", async () => {
     showToast("Hãy nhập tài liệu có ít nhất 20 từ.");
     return;
   }
+  elements.analyzeButton.disabled = true;
+  setAnalysisProgress({ progress: 1, phase: "queued", message: "Đang xếp tài liệu vào hàng xử lý." });
   try {
     if (state.pendingFile && state.backendAvailable) {
-      state.report = await apiRequest("/api/analyze-upload", {
-        method: "POST",
-        body: JSON.stringify({
-          filename: state.pendingFile.name,
-          contentBase64: await fileToBase64(state.pendingFile),
-          saveReport: true,
-          indexForComparison: elements.indexSubmission.checked,
-          enableWebSearch: Boolean(elements.enableWebSearch?.checked)
-        })
-      });
+      state.report = await pollAnalysisJob(await createUploadAnalysisJob(state.pendingFile));
       state.reportText = state.report.text;
       renderReport();
     } else {
       state.reportText = text;
       if (state.backendAvailable) {
-        state.report = await apiRequest("/api/analyze", {
-          method: "POST",
-          body: JSON.stringify({
-            text: state.reportText,
-            saveReport: true,
-            indexForComparison: elements.indexSubmission.checked,
-            enableWebSearch: Boolean(elements.enableWebSearch?.checked),
-            webSearchMaxResults: 5,
-            settings: {
-              excludeQuotes: elements.filterQuotes.checked,
-              excludeBibliography: elements.filterBibliography.checked,
-              minimumWords: Number(elements.filterMinimum.value)
-            }
-          })
-        });
+        state.report = await pollAnalysisJob(await createTextAnalysisJob(state.reportText));
         renderReport();
       } else {
         await refreshReport({ saveReport: true });
@@ -862,9 +964,13 @@ elements.analyzeButton.addEventListener("click", async () => {
     }
     if (state.backendAvailable) await refreshBackendData();
     renderHistory();
+    setAnalysisProgress({ progress: 100, phase: "completed", message: "Đã hoàn tất báo cáo tương đồng." });
     setView("report");
   } catch (error) {
+    setAnalysisProgress({ progress: state.analysisJob?.progress || 1, phase: "failed", message: error.message });
     showToast(error.message);
+  } finally {
+    elements.analyzeButton.disabled = false;
   }
 });
 
@@ -921,8 +1027,8 @@ document.querySelector(".dropzone").addEventListener("drop", async (event) => {
     showToast("Hệ thống hỗ trợ tệp .txt, .md, .docx và .pdf.");
     return;
   }
-  if (file.size > 10 * 1024 * 1024) {
-    showToast("Tệp vượt quá giới hạn 10 MB.");
+  if (file.size > maxUploadBytes()) {
+    showToast(`Tệp vượt quá giới hạn ${uploadLimitMegabytes()} MB.`);
     return;
   }
   if (/(\.docx|\.pdf)$/iu.test(file.name)) {
@@ -994,7 +1100,7 @@ elements.submissionLibrary.addEventListener("click", async (event) => {
 });
 
 async function refreshCrawlStatus() {
-  if (!state.backendAvailable) return;
+  if (!state.backendAvailable || !permissions().manageCrawler) return;
   try {
     const status = await apiRequest("/api/crawl/status");
     const result = status.lastResult;
