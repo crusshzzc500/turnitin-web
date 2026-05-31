@@ -202,7 +202,7 @@ class OpenSearchBackend:
 
 def create_search_backend(settings: Any, storage: Any) -> SearchBackend:
     if settings.search_backend == "sqlite":
-        return SQLiteFtsSearchBackend(storage)
+        return SQLiteFtsSearchBackend(storage, name=getattr(storage, "search_backend_name", "sqlite-fts5"))
     if settings.search_backend == "opensearch":
         return OpenSearchBackend(
             settings.opensearch_url,

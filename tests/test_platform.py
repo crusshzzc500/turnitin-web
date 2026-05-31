@@ -182,6 +182,7 @@ def settings_for(
     linkup_api_key: str = "",
     serper_api_key: str = "",
     public_mode: bool = False,
+    auth_mode: str = "demo",
 ) -> Settings:
     return Settings(
         root_dir=root,
@@ -200,6 +201,7 @@ def settings_for(
         linkup_api_key=linkup_api_key,
         serper_api_key=serper_api_key,
         public_mode=public_mode,
+        auth_mode=auth_mode,
     )
 
 
@@ -1245,6 +1247,48 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(reports["reports"], [])
                 self.assertEqual(submissions["submissions"], [])
                 self.assertEqual(error.exception.code, 403)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_password_mode_requires_cookie_and_persists_account_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_server(settings_for(Path(directory), port=0, auth_mode="password"))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                with self.assertRaises(HTTPError) as error:
+                    self._json(f"{base}/api/session", headers={"X-Minh-Chung-User": "demo-admin"})
+                self.assertEqual(error.exception.code, 401)
+
+                request = Request(
+                    f"{base}/api/auth/register",
+                    method="POST",
+                    data=json.dumps(
+                        {"username": "minh-test", "displayName": "Minh Test", "password": "mat-khau-123"}
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(request, timeout=5) as response:
+                    registered = json.loads(response.read().decode("utf-8"))
+                    cookie = response.headers["Set-Cookie"].split(";", 1)[0]
+
+                text = (
+                    "Liêm chính học thuật là nền tảng của một môi trường giáo dục đáng tin cậy. "
+                    "Người học cần phân biệt rõ việc tham khảo ý tưởng, trích dẫn trực tiếp và sao "
+                    "chép nội dung mà không ghi nhận nguồn."
+                )
+                report = self._json(
+                    f"{base}/api/analyze",
+                    method="POST",
+                    payload={"text": text},
+                    headers={"Cookie": cookie},
+                )
+                history = self._json(f"{base}/api/reports", headers={"Cookie": cookie})
+                self.assertEqual(registered["user"]["username"], "minh-test")
+                self.assertTrue(report["reportId"])
+                self.assertEqual(len(history["reports"]), 1)
             finally:
                 server.shutdown()
                 server.server_close()

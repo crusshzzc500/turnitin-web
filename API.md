@@ -11,10 +11,17 @@ máy chủ dùng `demo-admin`. Ba tài khoản có sẵn là `demo-admin`, `demo
 Khi `MINH_CHUNG_PUBLIC_MODE=1`, máy chủ bỏ qua header này, luôn dùng quyền sinh viên, không lưu
 bài hoặc báo cáo của khách và khóa API quản trị. Dùng public mode cho website mở tự do.
 
+Khi `MINH_CHUNG_AUTH_MODE=password`, máy chủ bỏ qua header demo và chỉ nhận cookie phiên đăng nhập.
+Chế độ này phù hợp cho bản Render quy mô nhỏ dùng Neon; tài khoản tự đăng ký có quyền `student`.
+
 | Phương thức | Đường dẫn | Mục đích |
 | --- | --- | --- |
 | `GET` | `/api/session/users` | Danh sách tài khoản demo để đổi vai trò trên giao diện. |
 | `GET` | `/api/session` | Người dùng hiện tại, tổ chức, vai trò và quyền thao tác. |
+| `GET` | `/api/auth/status` | Kiểm tra trình duyệt đã có phiên đăng nhập hợp lệ hay chưa. |
+| `POST` | `/api/auth/register` | Đăng ký tài khoản sinh viên bằng `username`, `displayName`, `password`. |
+| `POST` | `/api/auth/login` | Đăng nhập bằng `username`, `password`. |
+| `POST` | `/api/auth/logout` | Xóa phiên đăng nhập hiện tại. |
 | `GET` | `/api/audit?limit=100` | Nhật ký kiểm toán của tổ chức; chỉ `admin`. |
 
 ## Trạng thái và kho dữ liệu

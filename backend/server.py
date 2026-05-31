@@ -4,8 +4,11 @@ import base64
 import hashlib
 import json
 import mimetypes
+import re
 import traceback
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,7 +16,16 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .analysis import SimilarityAnalyzer
-from .auth import AuthenticationError, AuthorizationError, Principal, principal_from_user
+from .auth import (
+    AuthenticationError,
+    AuthorizationError,
+    Principal,
+    hash_password,
+    hash_session_token,
+    new_session_token,
+    principal_from_user,
+    verify_password,
+)
 from .config import Settings
 from .crawler import CrawlPolicyError, CrawlRunner, Crawler
 from .demo_data import seed_demo_sources
@@ -22,7 +34,7 @@ from .jobs import AnalysisJobManager, ProgressCallback
 from .ocr import ocr_status
 from .pdf_report import build_report_pdf
 from .search import SearchBackend, create_search_backend
-from .storage import Storage
+from .storage import Storage, create_storage
 from .text import count_words, normalize_display_text
 from .web_discovery import WebDiscovery
 
@@ -40,9 +52,9 @@ class AppContext:
 
     @classmethod
     def create(cls, settings: Settings) -> "AppContext":
-        storage = Storage(settings.database_path)
+        storage = create_storage(settings)
         search_backend = create_search_backend(settings, storage)
-        if search_backend.name != "sqlite-fts5":
+        if settings.search_backend == "opensearch":
             storage.attach_search_mirror(search_backend)
         seed_demo_sources(storage)
         crawler = Crawler(storage, settings)
@@ -143,9 +155,11 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "service": "minh-chung",
+                    "databaseBackend": self.context.storage.backend_name,
                     "searchBackend": self.context.search_backend.name,
                     "webDiscovery": self.context.web_discovery.status(),
                     "publicMode": self.context.settings.public_mode,
+                    "authRequired": self.context.settings.auth_mode == "password",
                     "documentMaxBytes": self.context.settings.document_max_bytes,
                     "webDiscoveryLimits": {
                         "queries": self.context.settings.web_discovery_max_queries,
@@ -164,12 +178,26 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if parsed.path == "/api/session/users":
-            users = (
-                [self.context.storage.get_user("demo-student")]
-                if self.context.settings.public_mode
-                else self.context.storage.list_users()
+        if parsed.path == "/api/auth/status":
+            user = self._authenticated_user()
+            self._send_json(
+                {
+                    "required": self.context.settings.auth_mode == "password",
+                    "authenticated": bool(user),
+                    "user": self._principal_payload(principal_from_user(user)) if user else None,
+                }
             )
+            return
+        if parsed.path == "/api/session/users":
+            if self.context.settings.auth_mode == "password":
+                self._principal()
+                users = [self._authenticated_user()]
+            else:
+                users = (
+                    [self.context.storage.get_user("demo-student")]
+                    if self.context.settings.public_mode
+                    else self.context.storage.list_users()
+                )
             self._send_json({"users": [user for user in users if user]})
             return
         principal = self._principal()
@@ -286,6 +314,15 @@ class AppRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_post(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/auth/register":
+            self._register(self._read_json())
+            return
+        if parsed.path == "/api/auth/login":
+            self._login(self._read_json())
+            return
+        if parsed.path == "/api/auth/logout":
+            self._logout()
+            return
         principal = self._principal()
         if parsed.path == "/api/analysis-jobs/upload":
             self._create_upload_analysis_job(principal)
@@ -577,6 +614,11 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True, "backend": self.context.search_backend.name, **result})
 
     def _principal(self) -> Principal:
+        if self.context.settings.auth_mode == "password":
+            user = self._authenticated_user()
+            if not user:
+                raise AuthenticationError("Hãy đăng nhập để tiếp tục.")
+            return principal_from_user(user)
         username = (
             "demo-student"
             if self.context.settings.public_mode
@@ -586,6 +628,74 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if not user:
             raise AuthenticationError("Không nhận diện được người dùng.")
         return principal_from_user(user)
+
+    def _authenticated_user(self) -> dict[str, Any] | None:
+        if self.context.settings.auth_mode != "password":
+            return None
+        token = self._session_token()
+        if not token:
+            return None
+        return self.context.storage.get_user_by_session(hash_session_token(token))
+
+    def _register(self, payload: dict[str, Any]) -> None:
+        if self.context.settings.auth_mode != "password":
+            raise ValueError("Đăng ký tài khoản chỉ dùng cho chế độ chính thức.")
+        username = str(payload.get("username", "")).strip().lower()
+        display_name = str(payload.get("displayName", "")).strip()
+        password = str(payload.get("password", ""))
+        if not re.fullmatch(r"[a-z0-9_.-]{3,40}", username):
+            raise ValueError("Tên đăng nhập cần 3-40 ký tự: chữ thường, số, dấu chấm, gạch ngang hoặc gạch dưới.")
+        if not 2 <= len(display_name) <= 80:
+            raise ValueError("Tên hiển thị cần từ 2 đến 80 ký tự.")
+        if len(password) < 8:
+            raise ValueError("Mật khẩu cần ít nhất 8 ký tự.")
+        user = self.context.storage.create_password_user(
+            username=username,
+            display_name=display_name,
+            password_hash=hash_password(password),
+            organization_name=self.context.settings.organization_name,
+        )
+        self._start_session(user)
+
+    def _login(self, payload: dict[str, Any]) -> None:
+        if self.context.settings.auth_mode != "password":
+            raise ValueError("Đăng nhập mật khẩu chỉ dùng cho chế độ chính thức.")
+        username = str(payload.get("username", "")).strip().lower()
+        password = str(payload.get("password", ""))
+        user = self.context.storage.get_password_user(username)
+        if not user or not verify_password(password, str(user["password_hash"])):
+            raise AuthenticationError("Tên đăng nhập hoặc mật khẩu không đúng.")
+        self._start_session(user)
+
+    def _logout(self) -> None:
+        token = self._session_token()
+        if token:
+            self.context.storage.delete_auth_session(hash_session_token(token))
+        self._send_json(
+            {"ok": True},
+            headers=[("Set-Cookie", "minh_chung_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure")],
+        )
+
+    def _start_session(self, user: dict[str, Any]) -> None:
+        token = new_session_token()
+        expires_at = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+        self.context.storage.create_auth_session(hash_session_token(token), int(user["id"]), expires_at)
+        self._send_json(
+            {"ok": True, "user": self._principal_payload(principal_from_user(user))},
+            HTTPStatus.CREATED,
+            headers=[
+                (
+                    "Set-Cookie",
+                    f"minh_chung_session={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Lax; Secure",
+                )
+            ],
+        )
+
+    def _session_token(self) -> str:
+        cookie = SimpleCookie()
+        cookie.load(self.headers.get("Cookie", ""))
+        morsel = cookie.get("minh_chung_session")
+        return morsel.value if morsel else ""
 
     def _organization_scope(self, principal: Principal) -> int | None:
         return None if self.context.settings.public_mode else principal.organization_id
@@ -674,7 +784,13 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             ],
         )
 
-    def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+    def _send_json(
+        self,
+        payload: dict[str, Any],
+        status: HTTPStatus = HTTPStatus.OK,
+        *,
+        headers: list[tuple[str, str]] | None = None,
+    ) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self._write_response(
             body,
@@ -683,6 +799,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 ("Content-Type", "application/json; charset=utf-8"),
                 ("Content-Length", str(len(body))),
                 ("Cache-Control", "no-store"),
+                *(headers or []),
             ],
         )
 

@@ -10,6 +10,7 @@ class Settings:
     root_dir: Path
     database_path: Path
     static_dir: Path
+    database_url: str = ""
     host: str = "127.0.0.1"
     port: int = 8765
     crawler_user_agent: str = "MinhChungResearchBot/0.1 (+contact: admin@example.invalid)"
@@ -49,6 +50,8 @@ class Settings:
     analysis_job_workers: int = 4
     analysis_job_ttl_seconds: int = 900
     public_mode: bool = False
+    auth_mode: str = "demo"
+    organization_name: str = "Minh Chung Workspace"
 
     @classmethod
     def from_env(cls, root_dir: Path | None = None) -> "Settings":
@@ -60,6 +63,7 @@ class Settings:
             root_dir=root,
             database_path=Path(os.getenv("MINH_CHUNG_DATABASE", data_dir / "minh_chung.db")),
             static_dir=root,
+            database_url=os.getenv("DATABASE_URL", "").strip(),
             host=os.getenv("MINH_CHUNG_HOST", "0.0.0.0" if platform_port else "127.0.0.1"),
             port=int(os.getenv("MINH_CHUNG_PORT", platform_port or "8765")),
             crawler_user_agent=os.getenv(
@@ -144,4 +148,11 @@ class Settings:
             analysis_job_workers=max(1, min(16, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_WORKERS", "4")))),
             analysis_job_ttl_seconds=max(60, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_TTL_SECONDS", "900"))),
             public_mode=os.getenv("MINH_CHUNG_PUBLIC_MODE", "1" if platform_port else "0") == "1",
+            auth_mode=(
+                os.getenv("MINH_CHUNG_AUTH_MODE", "demo").lower()
+                if os.getenv("MINH_CHUNG_AUTH_MODE", "demo").lower() in {"demo", "password"}
+                else "demo"
+            ),
+            organization_name=os.getenv("MINH_CHUNG_ORGANIZATION_NAME", "Minh Chung Workspace").strip()
+            or "Minh Chung Workspace",
         )

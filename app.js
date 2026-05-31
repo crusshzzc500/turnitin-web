@@ -59,6 +59,7 @@ const state = {
   submissions: [],
   searchStatus: null,
   health: null,
+  authRegistering: false,
   currentUsername: localStorage.getItem("minh-chung-user") || "demo-admin",
   session: null,
   users: []
@@ -68,6 +69,17 @@ const elements = {
   pageTitle: document.querySelector("#page-title"),
   activeUser: document.querySelector("#active-user"),
   userSwitcher: document.querySelector(".user-switcher"),
+  logoutButton: document.querySelector("#logout-button"),
+  authGate: document.querySelector("#auth-gate"),
+  authForm: document.querySelector("#auth-form"),
+  authTitle: document.querySelector("#auth-title"),
+  authDescription: document.querySelector("#auth-description"),
+  authToggle: document.querySelector("#auth-toggle"),
+  authSubmit: document.querySelector("#auth-submit"),
+  authUsername: document.querySelector("#auth-username"),
+  authPassword: document.querySelector("#auth-password"),
+  authDisplayName: document.querySelector("#auth-display-name"),
+  displayNameField: document.querySelector("#display-name-field"),
   enableWebSearch: document.querySelector("#enable-web-search"),
   webDiscoveryHint: document.querySelector("#web-discovery-hint"),
   backendStatus: document.querySelector("#backend-status"),
@@ -185,6 +197,27 @@ async function apiRequest(path, options = {}) {
   return payload;
 }
 
+function renderAuthGate() {
+  const registering = state.authRegistering;
+  elements.authGate.hidden = false;
+  elements.authTitle.textContent = registering ? "Tạo tài khoản" : "Đăng nhập để tiếp tục";
+  elements.authDescription.textContent = registering
+    ? "Tài khoản giúp lưu riêng lịch sử báo cáo của bạn trên hệ thống."
+    : "Báo cáo của bạn sẽ được lưu riêng trong tài khoản này.";
+  elements.displayNameField.hidden = !registering;
+  elements.authDisplayName.required = registering;
+  elements.authPassword.autocomplete = registering ? "new-password" : "current-password";
+  elements.authSubmit.textContent = registering ? "Tạo tài khoản" : "Đăng nhập";
+  elements.authToggle.textContent = registering
+    ? "Đã có tài khoản? Đăng nhập"
+    : "Chưa có tài khoản? Đăng ký";
+}
+
+function hideAuthGate() {
+  elements.authGate.hidden = true;
+  elements.authForm.reset();
+}
+
 function maxUploadBytes() {
   return Number(state.health?.documentMaxBytes || 250 * 1024 * 1024);
 }
@@ -288,6 +321,7 @@ function permissions() {
 function applySessionUI() {
   const access = permissions();
   const publicMode = Boolean(state.health?.publicMode);
+  const authRequired = Boolean(state.health?.authRequired);
   const maxQueries = Number(state.health?.webDiscoveryLimits?.queries || 10);
   const timeBudget = Number(state.health?.webDiscoveryLimits?.timeBudgetSeconds || 150);
   updateUploadLimit();
@@ -295,7 +329,8 @@ function applySessionUI() {
   elements.crawlerCard.hidden = !access.manageCrawler;
   elements.operationsCard.hidden = !access.manageCrawler;
   elements.auditCard.hidden = !access.viewAudit;
-  elements.userSwitcher.hidden = publicMode;
+  elements.userSwitcher.hidden = publicMode || authRequired;
+  elements.logoutButton.hidden = !authRequired || !state.session;
   elements.indexSubmissionOption.hidden = publicMode;
   if (publicMode) elements.indexSubmission.checked = false;
   elements.downloadReportPdf.hidden = !state.backendAvailable || !state.report?.reportId;
@@ -831,6 +866,17 @@ async function initializeBackend() {
     state.backendAvailable = true;
     elements.backendStatus.classList.remove("offline");
     elements.backendStatus.lastChild.textContent = " Máy chủ và chỉ mục sẵn sàng";
+    if (state.health.authRequired) {
+      const authStatus = await apiRequest("/api/auth/status");
+      if (!authStatus.authenticated) {
+        state.session = null;
+        elements.backendStatus.lastChild.textContent = " Hãy đăng nhập để tiếp tục";
+        renderAuthGate();
+        applySessionUI();
+        return;
+      }
+      hideAuthGate();
+    }
     await loadSession();
     await refreshBackendData();
   } catch {
@@ -840,6 +886,47 @@ async function initializeBackend() {
     applySessionUI();
   }
 }
+
+elements.authToggle.addEventListener("click", () => {
+  state.authRegistering = !state.authRegistering;
+  renderAuthGate();
+});
+
+elements.authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const endpoint = state.authRegistering ? "/api/auth/register" : "/api/auth/login";
+    const payload = {
+      username: elements.authUsername.value,
+      password: elements.authPassword.value
+    };
+    if (state.authRegistering) payload.displayName = elements.authDisplayName.value;
+    const result = await apiRequest(endpoint, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    state.currentUsername = result.user.username;
+    localStorage.setItem("minh-chung-user", state.currentUsername);
+    hideAuthGate();
+    await initializeBackend();
+    showToast(state.authRegistering ? "Đã tạo tài khoản." : "Đã đăng nhập.");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.logoutButton.addEventListener("click", async () => {
+  try {
+    await apiRequest("/api/auth/logout", { method: "POST", body: "{}" });
+  } finally {
+    state.session = null;
+    state.serverHistory = [];
+    state.authRegistering = false;
+    renderHistory();
+    renderAuthGate();
+    applySessionUI();
+  }
+});
 
 elements.activeUser.addEventListener("change", async () => {
   state.currentUsername = elements.activeUser.value;

@@ -68,6 +68,7 @@
               <span>Vai trò thử nghiệm</span>
               <select id="active-user"></select>
             </label>
+            <button id="logout-button" class="text-button" type="button" hidden>Đăng xuất</button>
             <span id="backend-status" class="status-pill"><i></i> Đang kiểm tra máy chủ</span>
             <button class="icon-button" type="button" aria-label="Thông báo">♢</button>
           </div>
@@ -304,7 +305,7 @@
         <section id="history-view" class="view simple-view">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">NHẬT KÝ CỤC BỘ</p>
+              <p class="eyebrow">LỊCH SỬ ĐÃ LƯU</p>
               <h2>Lịch sử báo cáo</h2>
             </div>
             <button id="clear-history" class="text-button" type="button">Xóa lịch sử</button>
@@ -382,6 +383,30 @@
         </section>
       </main>
     </div>
+
+    <section id="auth-gate" class="auth-gate" hidden>
+      <div class="auth-card">
+        <p class="eyebrow">MINH CHỨNG</p>
+        <h2 id="auth-title">Đăng nhập để tiếp tục</h2>
+        <p id="auth-description">Báo cáo của bạn sẽ được lưu riêng trong tài khoản này.</p>
+        <form id="auth-form">
+          <label id="display-name-field" hidden>
+            Tên hiển thị
+            <input id="auth-display-name" type="text" autocomplete="name" maxlength="80" />
+          </label>
+          <label>
+            Tên đăng nhập
+            <input id="auth-username" type="text" autocomplete="username" minlength="3" maxlength="40" required />
+          </label>
+          <label>
+            Mật khẩu
+            <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required />
+          </label>
+          <button id="auth-submit" class="primary-button" type="submit">Đăng nhập</button>
+        </form>
+        <button id="auth-toggle" class="text-button auth-toggle" type="button">Chưa có tài khoản? Đăng ký</button>
+      </div>
+    </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="./app.js"></script>

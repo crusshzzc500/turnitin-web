@@ -9,7 +9,13 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.8
       - key: MINH_CHUNG_PUBLIC_MODE
-        value: "1"
+        value: "0"
+      - key: MINH_CHUNG_AUTH_MODE
+        value: "password"
+      - key: MINH_CHUNG_ORGANIZATION_NAME
+        value: "Minh Chung Workspace"
+      - key: DATABASE_URL
+        sync: false
       - key: MINH_CHUNG_DOCUMENT_MAX_BYTES
         value: "250000000"
       - key: MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES

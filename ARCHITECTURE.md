@@ -5,7 +5,7 @@
 Phiên bản hiện tại là nền móng chạy thật trên một máy:
 
 - Máy chủ HTTP Python phục vụ giao diện và API.
-- SQLite lưu nguồn, lịch sử báo cáo và hàng đợi crawler.
+- SQLite lưu nguồn, lịch sử báo cáo và hàng đợi crawler khi chạy local; Render có thể dùng PostgreSQL Neon qua `DATABASE_URL`.
 - Nội dung nguồn được lưu theo phiên bản bất biến khi thay đổi.
 - SQLite FTS5 lập chỉ mục toàn văn theo từng đoạn.
 - Bộ phân tích tìm ứng viên, chấm mức tương đồng và tô màu đoạn cần rà soát.
@@ -29,6 +29,8 @@ Phiên bản hiện tại là nền móng chạy thật trên một máy:
 - Không gian dữ liệu theo tổ chức, ba vai trò demo và nhật ký kiểm toán cho thao tác quan trọng.
 - Public mode cho demo Render: khóa header giả lập admin, không lưu tài liệu khách và ẩn thao tác
   quản trị. Đây là lớp bảo vệ demo, không thay thế đăng nhập production.
+- Password mode cho Render quy mô nhỏ: tài khoản sinh viên tự đăng ký, mật khẩu băm PBKDF2 và
+  phiên cookie `HttpOnly`; header giả lập vai trò bị bỏ qua.
 - Xuất PDF báo cáo từ dữ liệu đã lưu trong phạm vi tổ chức.
 
 SQLite phù hợp cho phát triển, trình diễn và thử nghiệm với một đơn vị nhỏ. Nó

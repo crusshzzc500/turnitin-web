@@ -49,6 +49,72 @@ button {
   cursor: pointer;
 }
 
+.auth-gate {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 59, 49, 0.34);
+  backdrop-filter: blur(12px);
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  padding: 30px;
+  border: 1px solid rgba(227, 228, 220, 0.95);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.auth-card h2 {
+  margin: 8px 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 30px;
+}
+
+.auth-card p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.auth-card form,
+.auth-card label {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-card form {
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.auth-card label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid #dce5df;
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.auth-card .primary-button {
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.auth-toggle {
+  margin-top: 16px;
+}
+
 .app-shell {
   display: grid;
   min-height: 100vh;

@@ -17,15 +17,15 @@ Cách chạy thủ công:
 & 'C:\Users\Minh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' run.py
 ```
 
-Để deploy demo công khai lên Render, dùng [DEPLOY_RENDER.md](./DEPLOY_RENDER.md). File
-`render.yaml` bật public mode để khách không có quyền quản trị và máy chủ không lưu bài của khách.
+Để deploy bản chính thức quy mô nhỏ lên Render và Neon, dùng [DEPLOY_RENDER.md](./DEPLOY_RENDER.md).
+File `render.yaml` bật đăng nhập mật khẩu và lưu dữ liệu bền vững qua `DATABASE_URL`.
 
 ## Đã có
 
 - Tải nguyên bài hoặc dán `.txt`, `.md`, `.docx`, `.pdf`; giới hạn mặc định `250 MB`.
 - Thanh tiến trình phần trăm khi đọc tệp, quét web, đối chiếu nguồn và hoàn thiện báo cáo.
-- Ba vai trò thử nghiệm `admin`, `instructor`, `student`; dữ liệu riêng được giới hạn theo tổ chức.
-- Kho nguồn SQLite và chỉ mục toàn văn FTS5.
+- Bản local có ba vai trò thử nghiệm `admin`, `instructor`, `student`; bản Render dùng tài khoản mật khẩu thật.
+- Kho nguồn SQLite và chỉ mục toàn văn FTS5 cho local; PostgreSQL Neon và tìm kiếm `ILIKE` cho Render nhỏ gọn.
 - Lưu lịch sử phiên bản nguồn bất biến khi nội dung website thay đổi.
 - Đoạn tô màu, tỷ lệ tương đồng, danh sách nguồn và lịch sử báo cáo phía server.
 - Xuất báo cáo PDF có thông tin tổ chức, điểm tương đồng, nguồn, đoạn đối chiếu và cảnh báo liêm chính.
@@ -106,6 +106,12 @@ không tin header chọn vai trò từ client, khóa API quản trị và không
 Deployment có biến `PORT` như Render mặc định bật chế độ này; có thể đặt rõ
 `MINH_CHUNG_PUBLIC_MODE=0` cho bản nội bộ. Chế độ cục bộ mặc định vẫn giữ ba vai trò demo để
 phát triển và kiểm thử.
+
+## Chế độ chính thức nhỏ gọn
+
+Đặt `DATABASE_URL` bằng connection string Neon, `MINH_CHUNG_PUBLIC_MODE=0` và
+`MINH_CHUNG_AUTH_MODE=password`. Người dùng tự đăng ký tài khoản sinh viên; mật khẩu được băm PBKDF2,
+phiên đăng nhập dùng cookie `HttpOnly`, và lịch sử báo cáo được lưu trong PostgreSQL Neon.
 
 ## OCR cho PDF scan
 

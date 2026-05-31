@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -17,6 +18,9 @@ def utc_now() -> str:
 
 
 class Storage:
+    backend_name = "sqlite"
+    search_backend_name = "sqlite-fts5"
+
     def __init__(self, database_path: Path):
         self.database_path = Path(database_path)
         self.search_mirror: Any | None = None
@@ -161,8 +165,19 @@ class Storage:
                     username TEXT NOT NULL UNIQUE,
                     display_name TEXT NOT NULL,
                     role TEXT NOT NULL CHECK(role IN ('admin', 'instructor', 'student')),
+                    password_hash TEXT,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS auth_sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS auth_sessions_user_idx
+                ON auth_sessions(user_id);
 
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,6 +199,7 @@ class Storage:
             self._ensure_column(connection, "crawl_queue", "next_attempt_at", "TEXT")
             self._ensure_column(connection, "crawl_queue", "last_attempt_at", "TEXT")
             self._ensure_column(connection, "crawl_queue", "completed_at", "TEXT")
+            self._ensure_column(connection, "users", "password_hash", "TEXT")
             self._backfill_source_versions(connection)
             self._seed_demo_identities(connection)
 
@@ -441,12 +457,94 @@ class Storage:
                        users.role, organizations.name AS organization_name
                 FROM users
                 JOIN organizations ON organizations.id = users.organization_id
-                WHERE ? IS NULL OR users.organization_id = ?
+                WHERE CAST(? AS BIGINT) IS NULL OR users.organization_id = ?
                 ORDER BY users.id
                 """,
                 (organization_id, organization_id),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def create_password_user(
+        self,
+        *,
+        username: str,
+        display_name: str,
+        password_hash: str,
+        organization_name: str,
+        role: str = "student",
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO organizations(slug, name, created_at)
+                VALUES ('main-workspace', ?, ?)
+                """,
+                (organization_name, now),
+            )
+            organization = connection.execute(
+                "SELECT id FROM organizations WHERE slug = 'main-workspace'"
+            ).fetchone()
+            existing = connection.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if existing:
+                raise ValueError("Tên đăng nhập đã được sử dụng.")
+            connection.execute(
+                """
+                INSERT INTO users(organization_id, username, display_name, role, password_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (organization["id"], username, display_name, role, password_hash, now),
+            )
+        user = self.get_user(username)
+        if not user:  # pragma: no cover - database integrity guard
+            raise RuntimeError("Không thể tạo tài khoản.")
+        return user
+
+    def get_password_user(self, username: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT users.id, users.organization_id, users.username, users.display_name,
+                       users.role, users.password_hash, organizations.name AS organization_name
+                FROM users
+                JOIN organizations ON organizations.id = users.organization_id
+                WHERE users.username = ? AND users.password_hash IS NOT NULL
+                """,
+                (username,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_auth_session(self, token_hash: str, user_id: int, expires_at: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO auth_sessions(token_hash, user_id, expires_at, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (token_hash, user_id, expires_at, utc_now()),
+            )
+
+    def get_user_by_session(self, token_hash: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT users.id, users.organization_id, users.username, users.display_name,
+                       users.role, organizations.name AS organization_name
+                FROM auth_sessions
+                JOIN users ON users.id = auth_sessions.user_id
+                JOIN organizations ON organizations.id = users.organization_id
+                WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
+                """,
+                (token_hash, utc_now()),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_auth_session(self, token_hash: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
 
     def save_audit_event(
         self,
@@ -512,7 +610,9 @@ class Storage:
                 FROM sources
                 LEFT JOIN source_versions ON source_versions.source_id = sources.id
                 WHERE sources.organization_id IS NULL OR sources.organization_id = ?
-                GROUP BY sources.id
+                GROUP BY sources.id, sources.canonical_url, sources.url, sources.organization_id,
+                         sources.title, sources.source_type, sources.word_count, sources.fetched_at,
+                         sources.updated_at
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
@@ -592,7 +692,7 @@ class Storage:
                 SELECT id, title, similarity_percent, result_json, created_at
                 FROM reports
                 WHERE organization_id = ?
-                  AND (? IS NULL OR user_id = ?)
+                  AND (CAST(? AS BIGINT) IS NULL OR user_id = ?)
                 ORDER BY id DESC
                 LIMIT ?
                 """,
@@ -618,7 +718,7 @@ class Storage:
                 SELECT id, title, text_content, similarity_percent, result_json, created_at
                 FROM reports
                 WHERE id = ? AND organization_id = ?
-                  AND (? IS NULL OR user_id = ?)
+                  AND (CAST(? AS BIGINT) IS NULL OR user_id = ?)
                 """,
                 (report_id, organization_id, user_id, user_id),
             ).fetchone()
@@ -705,7 +805,7 @@ class Storage:
                 SELECT id, user_id, title, word_count, index_for_comparison, source_id, created_at
                 FROM submissions
                 WHERE organization_id = ?
-                  AND (? IS NULL OR user_id = ?)
+                  AND (CAST(? AS BIGINT) IS NULL OR user_id = ?)
                 ORDER BY id DESC
                 LIMIT ?
                 """,
@@ -956,3 +1056,292 @@ class Storage:
             "indexed_submissions": int(submission_stats["indexed_submissions"]),
             "crawl_queue": {row["status"]: int(row["count"]) for row in queue_rows},
         }
+
+
+class PostgresCursor:
+    def __init__(self, cursor: Any, *, lastrowid: int | None = None):
+        self.cursor = cursor
+        self.lastrowid = lastrowid
+
+    @property
+    def rowcount(self) -> int:
+        return int(self.cursor.rowcount)
+
+    def fetchone(self) -> Any:
+        return self.cursor.fetchone()
+
+    def fetchall(self) -> list[Any]:
+        return self.cursor.fetchall()
+
+
+class PostgresConnection:
+    _id_tables = {
+        "audit_events",
+        "chunks",
+        "crawl_queue",
+        "organizations",
+        "reports",
+        "source_versions",
+        "sources",
+        "submissions",
+        "users",
+    }
+
+    def __init__(self, connection: Any):
+        self.connection = connection
+
+    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> PostgresCursor:
+        statement = sql.strip().rstrip(";")
+        if statement.upper() == "BEGIN IMMEDIATE":
+            return PostgresCursor(self.connection.execute("SELECT 1"))
+        ignore_conflicts = bool(re.search(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", statement, re.IGNORECASE))
+        statement = re.sub(
+            r"\bINSERT\s+OR\s+IGNORE\s+INTO\b",
+            "INSERT INTO",
+            statement,
+            flags=re.IGNORECASE,
+        )
+        replace_session = bool(re.search(r"\bINSERT\s+OR\s+REPLACE\s+INTO\s+auth_sessions\b", statement, re.IGNORECASE))
+        statement = re.sub(
+            r"\bINSERT\s+OR\s+REPLACE\s+INTO\b",
+            "INSERT INTO",
+            statement,
+            flags=re.IGNORECASE,
+        )
+        statement = statement.replace("?", "%s")
+        if replace_session:
+            statement += " ON CONFLICT (token_hash) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at"
+        elif ignore_conflicts:
+            statement += " ON CONFLICT DO NOTHING"
+        table_match = re.match(r"\s*INSERT\s+INTO\s+([a-z_]+)", statement, re.IGNORECASE)
+        should_return_id = (
+            table_match
+            and table_match.group(1).lower() in self._id_tables
+            and bool(re.search(r"\bVALUES\b", statement, re.IGNORECASE))
+            and " RETURNING " not in f" {statement.upper()} "
+        )
+        if should_return_id:
+            statement += " RETURNING id"
+        cursor = self.connection.execute(statement, params)
+        lastrowid = None
+        if should_return_id:
+            row = cursor.fetchone()
+            lastrowid = int(row["id"]) if row else None
+        return PostgresCursor(cursor, lastrowid=lastrowid)
+
+
+class PostgresStorage(Storage):
+    backend_name = "postgresql"
+    search_backend_name = "postgres-like"
+
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+        self.search_mirror: Any | None = None
+        self.initialize()
+
+    @contextmanager
+    def connect(self) -> Iterator[PostgresConnection]:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as error:  # pragma: no cover - dependency is installed on Render
+            raise RuntimeError("Thiếu thư viện psycopg để kết nối PostgreSQL.") from error
+        connection = psycopg.connect(self.database_url, row_factory=dict_row, connect_timeout=10)
+        try:
+            yield PostgresConnection(connection)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def initialize(self) -> None:
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS sources (
+                id BIGSERIAL PRIMARY KEY,
+                organization_id BIGINT,
+                url TEXT NOT NULL UNIQUE,
+                canonical_url TEXT,
+                title TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'website',
+                text_content TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                fetched_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS chunks (
+                id BIGSERIAL PRIMARY KEY,
+                source_id BIGINT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                text_content TEXT NOT NULL,
+                normalized_text TEXT NOT NULL,
+                folded_text TEXT NOT NULL,
+                token_count INTEGER NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS crawl_queue (
+                id BIGSERIAL PRIMARY KEY,
+                url TEXT NOT NULL UNIQUE,
+                domain TEXT NOT NULL,
+                depth INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'queued',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                discovered_from TEXT,
+                next_attempt_at TEXT,
+                last_attempt_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS crawl_queue_status_idx ON crawl_queue(status, id)",
+            """
+            CREATE TABLE IF NOT EXISTS reports (
+                id BIGSERIAL PRIMARY KEY,
+                organization_id BIGINT,
+                user_id BIGINT,
+                title TEXT NOT NULL,
+                text_content TEXT NOT NULL,
+                similarity_percent INTEGER NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS submissions (
+                id BIGSERIAL PRIMARY KEY,
+                organization_id BIGINT,
+                user_id BIGINT,
+                title TEXT NOT NULL,
+                text_content TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                word_count INTEGER NOT NULL,
+                index_for_comparison INTEGER NOT NULL DEFAULT 0,
+                source_id BIGINT REFERENCES sources(id) ON DELETE SET NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS source_versions (
+                id BIGSERIAL PRIMARY KEY,
+                source_id BIGINT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                version_number INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                text_content TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                word_count INTEGER NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                fetched_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(source_id, version_number),
+                UNIQUE(source_id, content_hash)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS source_versions_source_idx ON source_versions(source_id, version_number DESC)",
+            """
+            CREATE TABLE IF NOT EXISTS organizations (
+                id BIGSERIAL PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                username TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('admin', 'instructor', 'student')),
+                password_hash TEXT,
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions(user_id)",
+            """
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id BIGSERIAL PRIMARY KEY,
+                organization_id BIGINT,
+                user_id BIGINT,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            )
+            """,
+        ]
+        with self.connect() as connection:
+            for statement in statements:
+                connection.execute(statement)
+            connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+            self._backfill_source_versions(connection)
+            self._seed_demo_identities(connection)
+
+    @staticmethod
+    def _backfill_source_versions(connection: PostgresConnection) -> None:
+        connection.execute(
+            """
+            INSERT INTO source_versions(
+                source_id, version_number, title, text_content, content_hash,
+                word_count, metadata_json, fetched_at, created_at
+            )
+            SELECT sources.id, 1, sources.title, sources.text_content, sources.content_hash,
+                   sources.word_count, sources.metadata_json, sources.fetched_at, sources.created_at
+            FROM sources
+            WHERE NOT EXISTS (
+                SELECT 1 FROM source_versions WHERE source_versions.source_id = sources.id
+            )
+            """
+        )
+
+    def search_chunks(self, text: str, limit: int = 100, organization_id: int | None = None) -> list[dict[str, Any]]:
+        terms = search_terms(text)[:10]
+        if not terms:
+            return []
+        conditions = " OR ".join("(chunks.normalized_text ILIKE ? OR chunks.folded_text ILIKE ?)" for _ in terms)
+        params: list[Any] = []
+        for term in terms:
+            wildcard = f"%{term}%"
+            params.extend([wildcard, wildcard])
+        params.extend([organization_id, limit])
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT chunks.id, chunks.text_content, chunks.token_count,
+                       sources.id AS source_id, COALESCE(sources.canonical_url, sources.url) AS url,
+                       sources.title, sources.source_type, sources.organization_id
+                FROM chunks
+                JOIN sources ON sources.id = chunks.source_id
+                WHERE ({conditions})
+                  AND (sources.organization_id IS NULL OR sources.organization_id = ?)
+                ORDER BY chunks.id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def create_storage(settings: Any) -> Storage:
+    if settings.database_url:
+        return PostgresStorage(settings.database_url)
+    return Storage(settings.database_path)
