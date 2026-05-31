@@ -301,9 +301,9 @@ function applySessionUI() {
   elements.downloadReportPdf.hidden = !state.backendAvailable || !state.report?.reportId;
   const providers = state.health?.webDiscovery || {};
   const discoveryMessage = state.report?.webDiscovery?.message || (
-    providers.tavily || providers.exa || providers.brave
+    providers.tavily || providers.exa || providers.serper || providers.brave
       ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống quét nhanh tối đa ${maxQueries} đoạn trích và dừng chờ nguồn chậm sau ${timeBudget} giây.`
-      : "Chưa cấu hình Tavily, Exa hoặc Brave. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
+      : "Chưa cấu hình Tavily, Exa, Serper hoặc Brave. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
   );
   elements.webDiscoveryHint.textContent = publicMode
     ? `Chế độ công khai không lưu bài hoặc báo cáo trên máy chủ. ${discoveryMessage}`

@@ -78,6 +78,7 @@ class WebDiscovery:
         return {
             "tavily": bool(self.settings.tavily_api_key),
             "exa": bool(self.settings.exa_api_key),
+            "serper": bool(self.settings.serper_api_key),
             "brave": bool(self.settings.brave_search_api_key),
         }
 
@@ -97,25 +98,35 @@ class WebDiscovery:
             ).to_dict()
         result_limit = max_results or self.settings.web_discovery_max_results
         result_limit = max(1, min(20, int(result_limit)))
+        result: DiscoveryResult | None = None
         if self.settings.tavily_api_key:
-            primary = self._tavily(queries, organization_id, result_limit, progress_callback)
-            if self.settings.exa_api_key and primary.indexed < self.settings.web_discovery_fallback_min_sources:
-                fallback = self._exa(
-                    queries[: self.settings.web_discovery_exa_max_queries],
-                    organization_id,
-                    min(10, result_limit),
-                    progress_callback,
-                    initial_seen_urls={source["url"] for source in primary.sources},
-                )
-                return self._merge_results(primary, fallback).to_dict()
-            return primary.to_dict()
-        if self.settings.exa_api_key:
-            return self._exa(
+            result = self._tavily(queries, organization_id, result_limit, progress_callback)
+        if (
+            self.settings.exa_api_key
+            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+        ):
+            fallback = self._exa(
                 queries[: self.settings.web_discovery_exa_max_queries],
                 organization_id,
                 min(10, result_limit),
                 progress_callback,
-            ).to_dict()
+                initial_seen_urls={source["url"] for source in result.sources} if result else None,
+            )
+            result = fallback if result is None else self._merge_results(result, fallback)
+        if (
+            self.settings.serper_api_key
+            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+        ):
+            fallback = self._serper(
+                queries[: self.settings.web_discovery_serper_max_queries],
+                organization_id,
+                min(10, result_limit),
+                progress_callback,
+                initial_seen_urls={source["url"] for source in result.sources} if result else None,
+            )
+            result = fallback if result is None else self._merge_results(result, fallback)
+        if result is not None:
+            return result.to_dict()
         if self.settings.brave_search_api_key:
             return self._brave(queries, organization_id, result_limit, progress_callback).to_dict()
         if progress_callback:
@@ -127,7 +138,7 @@ class WebDiscovery:
             queries,
             0,
             0,
-            "Chưa cấu hình Tavily, Exa hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
+            "Chưa cấu hình Tavily, Exa, Serper hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
             [],
         ).to_dict()
 
@@ -338,6 +349,69 @@ class WebDiscovery:
             message += f" Đã dừng chờ {timed_out} truy vấn chậm để trả báo cáo sớm."
         return DiscoveryResult("exa", True, True, queries, len(sources), skipped, message, sources)
 
+    def _serper(
+        self,
+        queries: list[str],
+        organization_id: int | None,
+        max_results: int,
+        progress_callback: DiscoveryProgressCallback | None = None,
+        initial_seen_urls: set[str] | None = None,
+    ) -> DiscoveryResult:
+        queries = queries[:1]
+        sources: list[dict[str, Any]] = []
+        skipped = 0
+        seen_urls = set(initial_seen_urls or ())
+        errors: list[str] = []
+        workers = min(len(queries), self.settings.web_discovery_parallel_workers)
+        timed_out = 0
+        executor = ThreadPoolExecutor(max_workers=max(1, workers))
+        try:
+            pending = {executor.submit(self._fetch_serper, query, max_results): query for query in queries}
+            for completed, future in enumerate(
+                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                start=1,
+            ):
+                query = pending[future]
+                try:
+                    data = future.result()
+                except Exception as error:
+                    errors.append(str(error))
+                    if progress_callback:
+                        progress_callback(completed, len(queries), len(sources))
+                    continue
+                for item in data.get("organic", []):
+                    indexed = self._index_candidate(
+                        provider="serper",
+                        query=query,
+                        canonical_url=str(item.get("link") or ""),
+                        title=str(item.get("title") or ""),
+                        content=str(item.get("snippet") or ""),
+                        organization_id=organization_id,
+                        minimum_words=8,
+                        seen_urls=seen_urls,
+                    )
+                    if indexed:
+                        sources.append(indexed)
+                    else:
+                        skipped += 1
+                if progress_callback:
+                    progress_callback(completed, len(queries), len(sources))
+        except FuturesTimeoutError:
+            timed_out = sum(not future.done() for future in pending)
+        finally:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+        message = (
+            f"Đã bổ sung {len(sources)} nguồn web công khai qua Serper fallback."
+            if sources else "Serper fallback không trả về nguồn mới đủ nội dung để lập chỉ mục."
+        )
+        if errors:
+            message += f" Có {len(errors)} truy vấn gặp lỗi."
+        if timed_out:
+            message += f" Đã dừng chờ {timed_out} truy vấn chậm để trả báo cáo sớm."
+        return DiscoveryResult("serper", True, True, queries, len(sources), skipped, message, sources)
+
     def _fetch_tavily(self, query: str, max_results: int) -> dict[str, Any]:
         return self._json_request(
             "https://api.tavily.com/search",
@@ -369,6 +443,14 @@ class WebDiscovery:
                 "contents": {"highlights": {"maxCharacters": 1200}},
             },
             headers={"x-api-key": self.settings.exa_api_key},
+            timeout=self.settings.web_discovery_request_timeout_seconds,
+        )
+
+    def _fetch_serper(self, query: str, max_results: int) -> dict[str, Any]:
+        return self._json_request(
+            "https://google.serper.dev/search",
+            {"q": query, "num": max_results},
+            headers={"X-API-KEY": self.settings.serper_api_key},
             timeout=self.settings.web_discovery_request_timeout_seconds,
         )
 

@@ -30,9 +30,13 @@ services:
         value: "2"
       - key: MINH_CHUNG_WEB_DISCOVERY_EXA_MODE
         value: "instant"
+      - key: MINH_CHUNG_WEB_DISCOVERY_SERPER_MAX_QUERIES
+        value: "1"
       - key: TAVILY_API_KEY
         sync: false
       - key: EXA_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
         sync: false
       - key: BRAVE_SEARCH_API_KEY
         sync: false

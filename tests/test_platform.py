@@ -178,6 +178,7 @@ def settings_for(
     retry_base_seconds: float = 0,
     tavily_api_key: str = "",
     exa_api_key: str = "",
+    serper_api_key: str = "",
     public_mode: bool = False,
 ) -> Settings:
     return Settings(
@@ -193,6 +194,7 @@ def settings_for(
         crawler_retry_base_seconds=retry_base_seconds,
         tavily_api_key=tavily_api_key,
         exa_api_key=exa_api_key,
+        serper_api_key=serper_api_key,
         public_mode=public_mode,
     )
 
@@ -364,6 +366,34 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_serper_uses_one_query_shape_with_server_side_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, serper_api_key="serper-test-key"), storage)
+            captured: dict = {}
+
+            def fake_request(url, payload, *, headers, timeout):
+                captured.update({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+                return {"organic": []}
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                discovery._fetch_serper("academic integrity", 10)
+            self.assertEqual(captured["url"], "https://google.serper.dev/search")
+            self.assertEqual(captured["payload"], {"q": "academic integrity", "num": 10})
+            self.assertEqual(captured["headers"]["X-API-KEY"], "serper-test-key")
+            self.assertEqual(captured["timeout"], 7.0)
+
+    def test_serper_hard_caps_queries_even_if_called_with_more_than_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, serper_api_key="serper-test-key"), storage)
+            with patch.object(discovery, "_fetch_serper", return_value={"organic": []}) as fetch:
+                result = discovery._serper(["one", "two", "three"], organization_id=1, max_results=10)
+            self.assertEqual(result.queries, ["one"])
+            fetch.assert_called_once_with("one", 10)
+
     def test_exa_uses_instant_search_with_highlights_and_server_side_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -417,7 +447,10 @@ class WebDiscoveryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             storage = Storage(root / "test.db")
-            discovery = WebDiscovery(settings_for(root, tavily_api_key="tavily", exa_api_key="exa"), storage)
+            discovery = WebDiscovery(
+                settings_for(root, tavily_api_key="tavily", exa_api_key="exa", serper_api_key="serper"),
+                storage,
+            )
             text = "Nội dung đủ dài để tạo truy vấn kiểm tra và xác minh bộ điều phối không gọi Exa khi Tavily đã đủ nguồn."
             sources = [
                 {"id": index, "title": f"Nguồn {index}", "url": f"https://example.org/{index}"}
@@ -427,10 +460,52 @@ class WebDiscoveryTest(unittest.TestCase):
             with (
                 patch.object(discovery, "_tavily", return_value=primary),
                 patch.object(discovery, "_exa") as exa,
+                patch.object(discovery, "_serper") as serper,
             ):
                 result = discovery.discover_and_index(text, organization_id=1)
             self.assertEqual(result["provider"], "tavily")
             exa.assert_not_called()
+            serper.assert_not_called()
+
+    def test_serper_fallback_runs_after_tavily_and_exa_still_have_too_few_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(
+                settings_for(root, tavily_api_key="tavily", exa_api_key="exa", serper_api_key="serper"),
+                storage,
+            )
+            text = "This sufficiently long excerpt exists to verify the final public web search fallback provider."
+            tavily = DiscoveryResult("tavily", True, True, ["primary"], 0, 0, "Tavily empty.", [])
+            exa = DiscoveryResult(
+                "exa",
+                True,
+                True,
+                ["fallback-exa"],
+                1,
+                0,
+                "Exa added one source.",
+                [{"id": 9, "title": "Exa source", "url": "https://example.org/exa"}],
+            )
+            serper_result = DiscoveryResult(
+                "serper",
+                True,
+                True,
+                ["fallback-serper"],
+                1,
+                0,
+                "Serper added one source.",
+                [{"id": 10, "title": "Serper source", "url": "https://example.org/serper"}],
+            )
+            with (
+                patch.object(discovery, "_tavily", return_value=tavily),
+                patch.object(discovery, "_exa", return_value=exa),
+                patch.object(discovery, "_serper", return_value=serper_result) as serper,
+            ):
+                result = discovery.discover_and_index(text, organization_id=1)
+            self.assertEqual(result["provider"], "tavily+exa+serper")
+            self.assertEqual(result["indexed"], 2)
+            self.assertLessEqual(len(serper.call_args.args[0]), 1)
 
     def test_tavily_uses_ultra_fast_snippets_without_raw_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -736,6 +811,7 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 4)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 2)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMode"], "instant")
+                self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)
                 self.assertEqual(stats["sources"], 4)
