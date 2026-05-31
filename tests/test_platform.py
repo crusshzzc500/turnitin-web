@@ -308,6 +308,22 @@ class ConfigTest(unittest.TestCase):
                 settings = Settings.from_env(Path(directory))
             self.assertFalse(settings.public_mode)
 
+    def test_database_url_enables_password_mode_even_with_stale_public_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                os.environ,
+                {
+                    "PORT": "9123",
+                    "DATABASE_URL": "postgresql://example.invalid/minh_chung",
+                    "MINH_CHUNG_PUBLIC_MODE": "1",
+                    "MINH_CHUNG_AUTH_MODE": "demo",
+                },
+                clear=True,
+            ):
+                settings = Settings.from_env(Path(directory))
+            self.assertFalse(settings.public_mode)
+            self.assertEqual(settings.auth_mode, "password")
+
 
 class SearchBackendTest(unittest.TestCase):
     def test_opensearch_adapter_indexes_deletes_searches_and_reports_status(self) -> None:

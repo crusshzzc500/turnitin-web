@@ -59,11 +59,12 @@ class Settings:
         data_dir = root / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         platform_port = os.getenv("PORT", "").strip()
+        database_url = os.getenv("DATABASE_URL", "").strip()
         return cls(
             root_dir=root,
             database_path=Path(os.getenv("MINH_CHUNG_DATABASE", data_dir / "minh_chung.db")),
             static_dir=root,
-            database_url=os.getenv("DATABASE_URL", "").strip(),
+            database_url=database_url,
             host=os.getenv("MINH_CHUNG_HOST", "0.0.0.0" if platform_port else "127.0.0.1"),
             port=int(os.getenv("MINH_CHUNG_PORT", platform_port or "8765")),
             crawler_user_agent=os.getenv(
@@ -147,11 +148,17 @@ class Settings:
             ),
             analysis_job_workers=max(1, min(16, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_WORKERS", "4")))),
             analysis_job_ttl_seconds=max(60, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_TTL_SECONDS", "900"))),
-            public_mode=os.getenv("MINH_CHUNG_PUBLIC_MODE", "1" if platform_port else "0") == "1",
+            public_mode=False
+            if database_url
+            else os.getenv("MINH_CHUNG_PUBLIC_MODE", "1" if platform_port else "0") == "1",
             auth_mode=(
-                os.getenv("MINH_CHUNG_AUTH_MODE", "demo").lower()
-                if os.getenv("MINH_CHUNG_AUTH_MODE", "demo").lower() in {"demo", "password"}
-                else "demo"
+                "password"
+                if database_url
+                else (
+                    os.getenv("MINH_CHUNG_AUTH_MODE", "demo").lower()
+                    if os.getenv("MINH_CHUNG_AUTH_MODE", "demo").lower() in {"demo", "password"}
+                    else "demo"
+                )
             ),
             organization_name=os.getenv("MINH_CHUNG_ORGANIZATION_NAME", "Minh Chung Workspace").strip()
             or "Minh Chung Workspace",

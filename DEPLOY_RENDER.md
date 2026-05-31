@@ -9,6 +9,9 @@ PostgreSQL Neon qua biến `DATABASE_URL`. Ở chế độ này:
 - Phiên đăng nhập dùng cookie `HttpOnly`, kéo dài tối đa 7 ngày.
 - Tài khoản tự đăng ký có quyền sinh viên, không thể dùng header để giả mạo `admin`.
 - Báo cáo, nguồn quét web và lịch sử được lưu trong Neon nên không mất sau khi Render restart.
+
+Khi `DATABASE_URL` có giá trị, ứng dụng cũng tự ưu tiên chế độ chính thức và đăng nhập mật khẩu.
+Điều này tránh việc một biến demo cũ còn sót lại trên Render vô tình tắt lưu lịch sử.
 - Tùy chọn quét web mặc định tắt; chỉ gửi đoạn trích sang nhà cung cấp tìm kiếm bên ngoài khi khách chủ động bật.
 - Tavily dùng `fast`, không lấy toàn bộ nội dung trang và có ngân sách chờ tối đa `150` giây.
 - Exa chỉ chạy fallback khi Tavily thiếu nguồn, dùng `instant`, lấy `highlights` và nhận tối đa `3`
