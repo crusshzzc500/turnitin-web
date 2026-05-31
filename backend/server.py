@@ -150,6 +150,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         parts = [part for part in parsed.path.split("/") if part]
+        if parsed.path in {"", "/", "/index.html", "/styles.css", "/app.js", "/preview.png"}:
+            self._serve_static(parsed.path)
+            return
         if parsed.path == "/api/health":
             self._send_json(
                 {

@@ -1274,6 +1274,7 @@ class ApiTest(unittest.TestCase):
             thread.start()
             try:
                 base = f"http://127.0.0.1:{server.server_address[1]}"
+                self.assertIn('id="auth-gate"', self._raw(f"{base}/").decode("utf-8"))
                 with self.assertRaises(HTTPError) as error:
                     self._json(f"{base}/api/session", headers={"X-Minh-Chung-User": "demo-admin"})
                 self.assertEqual(error.exception.code, 401)
