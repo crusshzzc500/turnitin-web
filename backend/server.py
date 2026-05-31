@@ -156,6 +156,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "fallbackMinSources": self.context.settings.web_discovery_fallback_min_sources,
                         "exaMaxQueries": self.context.settings.web_discovery_exa_max_queries,
                         "exaMode": self.context.settings.web_discovery_exa_mode,
+                        "websearchapiMaxQueries": self.context.settings.web_discovery_websearchapi_max_queries,
+                        "linkupMaxQueries": self.context.settings.web_discovery_linkup_max_queries,
+                        "linkupDepth": self.context.settings.web_discovery_linkup_depth,
                         "serperMaxQueries": self.context.settings.web_discovery_serper_max_queries,
                     },
                 }

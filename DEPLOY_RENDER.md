@@ -7,14 +7,16 @@
 - Khách không thể giả mạo header để trở thành `admin`.
 - API crawler, reindex, thêm nguồn thủ công và nhật ký kiểm toán bị khóa.
 - Máy chủ không lưu bài nộp hoặc báo cáo của khách.
-- Tùy chọn quét web mặc định tắt; chỉ gửi đoạn trích sang Tavily, Exa, Serper hoặc Brave khi khách chủ động bật.
+- Tùy chọn quét web mặc định tắt; chỉ gửi đoạn trích sang nhà cung cấp tìm kiếm bên ngoài khi khách chủ động bật.
 - Tavily dùng `fast`, không lấy toàn bộ nội dung trang và có ngân sách chờ tối đa `150` giây.
 - Exa chỉ chạy fallback khi Tavily thiếu nguồn, dùng `instant`, lấy `highlights` và nhận tối đa `3`
   truy vấn mỗi báo cáo để tiết kiệm quota miễn phí.
-- Serper chỉ chạy fallback cuối nếu tổng nguồn Tavily và Exa vẫn thiếu, nhận tối đa `1` truy vấn mỗi báo cáo.
+- WebSearchAPI.ai và Linkup chỉ chạy fallback nếu tổng nguồn vẫn thiếu; mỗi bên nhận tối đa `1` truy vấn.
+- Serper chỉ chạy fallback cuối nếu tổng nguồn vẫn thiếu, nhận tối đa `1` truy vấn mỗi báo cáo.
 
 Tạo Blueprint từ repository chứa file `render.yaml`, sau đó nhập `TAVILY_API_KEY`, `EXA_API_KEY`,
-`SERPER_API_KEY` hoặc `BRAVE_SEARCH_API_KEY` trong phần Environment của Render. Không đưa API key vào Git hoặc ZIP.
+`WEBSEARCHAPI_API_KEY`, `LINKUP_API_KEY`, `SERPER_API_KEY` hoặc `BRAVE_SEARCH_API_KEY` trong phần Environment
+của Render. Không đưa API key vào Git hoặc ZIP.
 
 Render cung cấp biến `PORT`; máy chủ đã tự nhận biến này, bind `0.0.0.0` và mặc định bật public
 mode an toàn. Có thể đặt rõ `MINH_CHUNG_PUBLIC_MODE=0` cho một deployment nội bộ riêng.

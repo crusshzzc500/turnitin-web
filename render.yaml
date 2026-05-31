@@ -30,11 +30,21 @@ services:
         value: "3"
       - key: MINH_CHUNG_WEB_DISCOVERY_EXA_MODE
         value: "instant"
+      - key: MINH_CHUNG_WEB_DISCOVERY_WEBSEARCHAPI_MAX_QUERIES
+        value: "1"
+      - key: MINH_CHUNG_WEB_DISCOVERY_LINKUP_MAX_QUERIES
+        value: "1"
+      - key: MINH_CHUNG_WEB_DISCOVERY_LINKUP_DEPTH
+        value: "fast"
       - key: MINH_CHUNG_WEB_DISCOVERY_SERPER_MAX_QUERIES
         value: "1"
       - key: TAVILY_API_KEY
         sync: false
       - key: EXA_API_KEY
+        sync: false
+      - key: WEBSEARCHAPI_API_KEY
+        sync: false
+      - key: LINKUP_API_KEY
         sync: false
       - key: SERPER_API_KEY
         sync: false

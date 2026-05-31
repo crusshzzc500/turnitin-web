@@ -178,6 +178,8 @@ def settings_for(
     retry_base_seconds: float = 0,
     tavily_api_key: str = "",
     exa_api_key: str = "",
+    websearchapi_api_key: str = "",
+    linkup_api_key: str = "",
     serper_api_key: str = "",
     public_mode: bool = False,
 ) -> Settings:
@@ -194,6 +196,8 @@ def settings_for(
         crawler_retry_base_seconds=retry_base_seconds,
         tavily_api_key=tavily_api_key,
         exa_api_key=exa_api_key,
+        websearchapi_api_key=websearchapi_api_key,
+        linkup_api_key=linkup_api_key,
         serper_api_key=serper_api_key,
         public_mode=public_mode,
     )
@@ -366,6 +370,44 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_websearchapi_uses_basic_search_without_content_with_server_side_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, websearchapi_api_key="websearch-test-key"), storage)
+            captured: dict = {}
+
+            def fake_request(url, payload, *, headers, timeout):
+                captured.update({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+                return {"organic": []}
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                discovery._fetch_websearchapi("academic integrity", 10)
+            self.assertEqual(captured["url"], "https://api.websearchapi.ai/ai-search")
+            self.assertFalse(captured["payload"]["includeContent"])
+            self.assertFalse(captured["payload"]["includeAnswer"])
+            self.assertEqual(captured["headers"]["Authorization"], "Bearer websearch-test-key")
+            self.assertEqual(captured["timeout"], 45.0)
+
+    def test_linkup_uses_fast_search_results_with_server_side_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, linkup_api_key="linkup-test-key"), storage)
+            captured: dict = {}
+
+            def fake_request(url, payload, *, headers, timeout):
+                captured.update({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+                return {"results": []}
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                discovery._fetch_linkup("academic integrity", 10)
+            self.assertEqual(captured["url"], "https://api.linkup.so/v1/search")
+            self.assertEqual(captured["payload"]["depth"], "fast")
+            self.assertEqual(captured["payload"]["outputType"], "searchResults")
+            self.assertEqual(captured["headers"]["Authorization"], "Bearer linkup-test-key")
+            self.assertEqual(captured["timeout"], 45.0)
+
     def test_serper_uses_one_query_shape_with_server_side_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -393,6 +435,25 @@ class WebDiscoveryTest(unittest.TestCase):
                 result = discovery._serper(["one", "two", "three"], organization_id=1, max_results=10)
             self.assertEqual(result.queries, ["one"])
             fetch.assert_called_once_with("one", 10)
+
+    def test_new_fallbacks_hard_cap_queries_even_if_called_with_more_than_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(
+                settings_for(root, websearchapi_api_key="websearch", linkup_api_key="linkup"),
+                storage,
+            )
+            with (
+                patch.object(discovery, "_fetch_websearchapi", return_value={"organic": []}) as websearch,
+                patch.object(discovery, "_fetch_linkup", return_value={"results": []}) as linkup,
+            ):
+                websearch_result = discovery._websearchapi(["one", "two"], organization_id=1, max_results=10)
+                linkup_result = discovery._linkup(["one", "two"], organization_id=1, max_results=10)
+            self.assertEqual(websearch_result.queries, ["one"])
+            self.assertEqual(linkup_result.queries, ["one"])
+            websearch.assert_called_once_with("one", 10)
+            linkup.assert_called_once_with("one", 10)
 
     def test_exa_uses_instant_search_with_highlights_and_server_side_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -505,6 +566,50 @@ class WebDiscoveryTest(unittest.TestCase):
                 result = discovery.discover_and_index(text, organization_id=1)
             self.assertEqual(result["provider"], "tavily+exa+serper")
             self.assertEqual(result["indexed"], 2)
+            self.assertLessEqual(len(serper.call_args.args[0]), 1)
+
+    def test_new_fallbacks_run_between_exa_and_serper_when_sources_are_still_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(
+                settings_for(
+                    root,
+                    tavily_api_key="tavily",
+                    exa_api_key="exa",
+                    websearchapi_api_key="websearch",
+                    linkup_api_key="linkup",
+                    serper_api_key="serper",
+                ),
+                storage,
+            )
+            text = "This sufficiently long excerpt verifies the complete quota saving public web fallback chain."
+            calls: list[str] = []
+
+            def result(provider: str, url: str) -> DiscoveryResult:
+                return DiscoveryResult(
+                    provider,
+                    True,
+                    True,
+                    [provider],
+                    1,
+                    0,
+                    f"{provider} source.",
+                    [{"id": len(calls), "title": provider, "url": url}],
+                )
+
+            with (
+                patch.object(discovery, "_tavily", side_effect=lambda *args: (calls.append("tavily"), result("tavily", "https://example.org/tavily"))[1]),
+                patch.object(discovery, "_exa", side_effect=lambda *args, **kwargs: (calls.append("exa"), result("exa", "https://example.org/exa"))[1]),
+                patch.object(discovery, "_websearchapi", side_effect=lambda *args, **kwargs: (calls.append("websearchapi"), result("websearchapi", "https://example.org/websearchapi"))[1]) as websearch,
+                patch.object(discovery, "_linkup", side_effect=lambda *args, **kwargs: (calls.append("linkup"), result("linkup", "https://example.org/linkup"))[1]) as linkup,
+                patch.object(discovery, "_serper", side_effect=lambda *args, **kwargs: (calls.append("serper"), result("serper", "https://example.org/serper"))[1]) as serper,
+            ):
+                result_payload = discovery.discover_and_index(text, organization_id=1)
+            self.assertEqual(calls, ["tavily", "exa", "websearchapi", "linkup", "serper"])
+            self.assertEqual(result_payload["provider"], "tavily+exa+websearchapi+linkup+serper")
+            self.assertLessEqual(len(websearch.call_args.args[0]), 1)
+            self.assertLessEqual(len(linkup.call_args.args[0]), 1)
             self.assertLessEqual(len(serper.call_args.args[0]), 1)
 
     def test_tavily_uses_fast_snippets_without_raw_content(self) -> None:
@@ -813,6 +918,9 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 8)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMode"], "instant")
+                self.assertEqual(health["webDiscoveryLimits"]["websearchapiMaxQueries"], 1)
+                self.assertEqual(health["webDiscoveryLimits"]["linkupMaxQueries"], 1)
+                self.assertEqual(health["webDiscoveryLimits"]["linkupDepth"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)

@@ -78,6 +78,8 @@ class WebDiscovery:
         return {
             "tavily": bool(self.settings.tavily_api_key),
             "exa": bool(self.settings.exa_api_key),
+            "websearchapi": bool(self.settings.websearchapi_api_key),
+            "linkup": bool(self.settings.linkup_api_key),
             "serper": bool(self.settings.serper_api_key),
             "brave": bool(self.settings.brave_search_api_key),
         }
@@ -114,6 +116,30 @@ class WebDiscovery:
             )
             result = fallback if result is None else self._merge_results(result, fallback)
         if (
+            self.settings.websearchapi_api_key
+            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+        ):
+            fallback = self._websearchapi(
+                queries[: self.settings.web_discovery_websearchapi_max_queries],
+                organization_id,
+                min(10, result_limit),
+                progress_callback,
+                initial_seen_urls={source["url"] for source in result.sources} if result else None,
+            )
+            result = fallback if result is None else self._merge_results(result, fallback)
+        if (
+            self.settings.linkup_api_key
+            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+        ):
+            fallback = self._linkup(
+                queries[: self.settings.web_discovery_linkup_max_queries],
+                organization_id,
+                min(10, result_limit),
+                progress_callback,
+                initial_seen_urls={source["url"] for source in result.sources} if result else None,
+            )
+            result = fallback if result is None else self._merge_results(result, fallback)
+        if (
             self.settings.serper_api_key
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
         ):
@@ -138,7 +164,7 @@ class WebDiscovery:
             queries,
             0,
             0,
-            "Chưa cấu hình Tavily, Exa, Serper hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
+            "Chưa cấu hình Tavily, Exa, WebSearchAPI.ai, Linkup, Serper hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
             [],
         ).to_dict()
 
@@ -412,6 +438,98 @@ class WebDiscovery:
             message += f" Đã dừng chờ {timed_out} truy vấn chậm để trả báo cáo sớm."
         return DiscoveryResult("serper", True, True, queries, len(sources), skipped, message, sources)
 
+    def _websearchapi(
+        self,
+        queries: list[str],
+        organization_id: int | None,
+        max_results: int,
+        progress_callback: DiscoveryProgressCallback | None = None,
+        initial_seen_urls: set[str] | None = None,
+    ) -> DiscoveryResult:
+        queries = queries[:1]
+        sources: list[dict[str, Any]] = []
+        skipped = 0
+        seen_urls = set(initial_seen_urls or ())
+        errors: list[str] = []
+        for completed, query in enumerate(queries, start=1):
+            try:
+                data = self._fetch_websearchapi(query, max_results)
+            except Exception as error:
+                errors.append(str(error))
+                if progress_callback:
+                    progress_callback(completed, len(queries), len(sources))
+                continue
+            for item in data.get("organic", []):
+                indexed = self._index_candidate(
+                    provider="websearchapi",
+                    query=query,
+                    canonical_url=str(item.get("url") or ""),
+                    title=str(item.get("title") or ""),
+                    content=str(item.get("description") or item.get("content") or ""),
+                    organization_id=organization_id,
+                    minimum_words=8,
+                    seen_urls=seen_urls,
+                )
+                if indexed:
+                    sources.append(indexed)
+                else:
+                    skipped += 1
+            if progress_callback:
+                progress_callback(completed, len(queries), len(sources))
+        message = (
+            f"Đã bổ sung {len(sources)} nguồn web công khai qua WebSearchAPI.ai fallback."
+            if sources else "WebSearchAPI.ai fallback không trả về nguồn mới đủ nội dung để lập chỉ mục."
+        )
+        if errors:
+            message += f" Có {len(errors)} truy vấn gặp lỗi."
+        return DiscoveryResult("websearchapi", True, True, queries, len(sources), skipped, message, sources)
+
+    def _linkup(
+        self,
+        queries: list[str],
+        organization_id: int | None,
+        max_results: int,
+        progress_callback: DiscoveryProgressCallback | None = None,
+        initial_seen_urls: set[str] | None = None,
+    ) -> DiscoveryResult:
+        queries = queries[:1]
+        sources: list[dict[str, Any]] = []
+        skipped = 0
+        seen_urls = set(initial_seen_urls or ())
+        errors: list[str] = []
+        for completed, query in enumerate(queries, start=1):
+            try:
+                data = self._fetch_linkup(query, max_results)
+            except Exception as error:
+                errors.append(str(error))
+                if progress_callback:
+                    progress_callback(completed, len(queries), len(sources))
+                continue
+            for item in data.get("results", []):
+                indexed = self._index_candidate(
+                    provider="linkup",
+                    query=query,
+                    canonical_url=str(item.get("url") or ""),
+                    title=str(item.get("name") or ""),
+                    content=str(item.get("content") or ""),
+                    organization_id=organization_id,
+                    minimum_words=8,
+                    seen_urls=seen_urls,
+                )
+                if indexed:
+                    sources.append(indexed)
+                else:
+                    skipped += 1
+            if progress_callback:
+                progress_callback(completed, len(queries), len(sources))
+        message = (
+            f"Đã bổ sung {len(sources)} nguồn web công khai qua Linkup fallback."
+            if sources else "Linkup fallback không trả về nguồn mới đủ nội dung để lập chỉ mục."
+        )
+        if errors:
+            message += f" Có {len(errors)} truy vấn gặp lỗi."
+        return DiscoveryResult("linkup", True, True, queries, len(sources), skipped, message, sources)
+
     def _fetch_tavily(self, query: str, max_results: int) -> dict[str, Any]:
         return self._json_request(
             "https://api.tavily.com/search",
@@ -451,6 +569,34 @@ class WebDiscovery:
             "https://google.serper.dev/search",
             {"q": query, "num": max_results},
             headers={"X-API-KEY": self.settings.serper_api_key},
+            timeout=self.settings.web_discovery_request_timeout_seconds,
+        )
+
+    def _fetch_websearchapi(self, query: str, max_results: int) -> dict[str, Any]:
+        return self._json_request(
+            "https://api.websearchapi.ai/ai-search",
+            {
+                "query": query,
+                "maxResults": max_results,
+                "includeContent": False,
+                "includeAnswer": False,
+                "safeSearch": True,
+            },
+            headers={"Authorization": f"Bearer {self.settings.websearchapi_api_key}"},
+            timeout=self.settings.web_discovery_request_timeout_seconds,
+        )
+
+    def _fetch_linkup(self, query: str, max_results: int) -> dict[str, Any]:
+        return self._json_request(
+            "https://api.linkup.so/v1/search",
+            {
+                "q": query,
+                "depth": self.settings.web_discovery_linkup_depth,
+                "outputType": "searchResults",
+                "includeImages": False,
+                "maxResults": max_results,
+            },
+            headers={"Authorization": f"Bearer {self.settings.linkup_api_key}"},
             timeout=self.settings.web_discovery_request_timeout_seconds,
         )
 
