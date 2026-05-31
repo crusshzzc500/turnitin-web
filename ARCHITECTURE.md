@@ -17,9 +17,10 @@ Phiên bản hiện tại là nền móng chạy thật trên một máy:
   kích thước giải nén DOCX.
 - Job phân tích nền có token riêng và phần trăm tiến trình cho giao diện public.
 - PDF scan ít chữ có OCR fallback tùy chọn qua Tesseract và endpoint kiểm tra trạng thái.
-- WebDiscovery tùy chọn qua Tavily hoặc Brave: trích tối đa `6` câu, quét truy vấn song song,
-  ưu tiên Tavily `ultra-fast`, trả kết quả từng phần theo ngân sách thời gian, giới hạn kích thước
-  nội dung và lưu nguồn theo namespace tổ chức.
+- WebDiscovery tùy chọn qua Tavily, Exa hoặc Brave: trích tối đa `6` câu, quét truy vấn song song,
+  ưu tiên Tavily `ultra-fast`, chỉ gọi tối đa `2` truy vấn Exa `instant` khi Tavily thiếu nguồn,
+  trả kết quả từng phần theo ngân sách thời gian, giới hạn kích thước nội dung và lưu nguồn theo
+  namespace tổ chức.
 - Chuẩn hóa Unicode ở đầu vào tài liệu và nguồn web; vùng nội dung báo cáo dùng Times New Roman.
 - Quét ký tự vô hình, bảng chữ cái trộn lẫn và định dạng DOCX đáng ngờ.
 - Kho bài nộp nội bộ chỉ lập chỉ mục khi người dùng đồng ý và cho phép rút bài

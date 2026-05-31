@@ -27,6 +27,7 @@ class Settings:
     opensearch_index: str = "minh-chung-chunks"
     opensearch_timeout_seconds: float = 8.0
     tavily_api_key: str = ""
+    exa_api_key: str = ""
     brave_search_api_key: str = ""
     web_discovery_max_queries: int = 6
     web_discovery_max_results: int = 10
@@ -35,6 +36,9 @@ class Settings:
     web_discovery_mode: str = "ultra-fast"
     web_discovery_time_budget_seconds: float = 8.0
     web_discovery_request_timeout_seconds: float = 7.0
+    web_discovery_fallback_min_sources: int = 4
+    web_discovery_exa_max_queries: int = 2
+    web_discovery_exa_mode: str = "instant"
     analysis_job_workers: int = 4
     analysis_job_ttl_seconds: int = 900
     public_mode: bool = False
@@ -72,6 +76,7 @@ class Settings:
             opensearch_index=os.getenv("MINH_CHUNG_OPENSEARCH_INDEX", "minh-chung-chunks"),
             opensearch_timeout_seconds=float(os.getenv("MINH_CHUNG_OPENSEARCH_TIMEOUT_SECONDS", "8")),
             tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
+            exa_api_key=os.getenv("EXA_API_KEY", "").strip(),
             brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY", "").strip(),
             web_discovery_max_queries=max(1, min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES", "6")))),
             web_discovery_max_results=max(1, min(20, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS", "10")))),
@@ -95,6 +100,19 @@ class Settings:
             web_discovery_request_timeout_seconds=max(
                 1.0,
                 min(20.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS", "7"))),
+            ),
+            web_discovery_fallback_min_sources=max(
+                1,
+                min(20, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_FALLBACK_MIN_SOURCES", "4"))),
+            ),
+            web_discovery_exa_max_queries=max(
+                1,
+                min(3, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_EXA_MAX_QUERIES", "2"))),
+            ),
+            web_discovery_exa_mode=(
+                os.getenv("MINH_CHUNG_WEB_DISCOVERY_EXA_MODE", "instant")
+                if os.getenv("MINH_CHUNG_WEB_DISCOVERY_EXA_MODE", "instant") in {"instant", "fast", "auto"}
+                else "instant"
             ),
             analysis_job_workers=max(1, min(16, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_WORKERS", "4")))),
             analysis_job_ttl_seconds=max(60, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_TTL_SECONDS", "900"))),

@@ -153,6 +153,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "parallelWorkers": self.context.settings.web_discovery_parallel_workers,
                         "mode": self.context.settings.web_discovery_mode,
                         "timeBudgetSeconds": self.context.settings.web_discovery_time_budget_seconds,
+                        "fallbackMinSources": self.context.settings.web_discovery_fallback_min_sources,
+                        "exaMaxQueries": self.context.settings.web_discovery_exa_max_queries,
+                        "exaMode": self.context.settings.web_discovery_exa_mode,
                     },
                 }
             )

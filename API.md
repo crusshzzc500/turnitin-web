@@ -21,7 +21,7 @@ bài hoặc báo cáo của khách và khóa API quản trị. Dùng public mode
 
 | Phương thức | Đường dẫn | Mục đích |
 | --- | --- | --- |
-| `GET` | `/api/health` | Kiểm tra máy chủ và trạng thái cấu hình Tavily/Brave; không lộ API key. |
+| `GET` | `/api/health` | Kiểm tra máy chủ và trạng thái cấu hình Tavily/Exa/Brave; không lộ API key. |
 | `GET` | `/api/ocr/status` | Kiểm tra OCR PDF scan có sẵn trên máy chủ hay không. |
 | `GET` | `/api/stats` | Số nguồn, đoạn chỉ mục, bài nộp, báo cáo và hàng đợi crawler. |
 | `GET` | `/api/sources?limit=100` | Danh sách nguồn đối chiếu. |
@@ -72,7 +72,9 @@ Ví dụ phân tích:
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.
 
 `enableWebSearch` cũng mặc định là `false`. Khi đặt thành `true`, tối đa `6` đoạn trích nổi bật
-được gửi song song sang Tavily hoặc Brave để tìm nguồn công khai. Mỗi truy vấn nhận tối đa `10`
+được gửi song song sang Tavily để tìm nguồn công khai. Nếu Tavily thiếu nguồn hoặc không dùng được,
+Exa `instant` fallback nhận tối đa `2` truy vấn và chỉ trả `highlights` để tiết kiệm quota miễn phí.
+Brave là dự phòng tiếp theo khi không có Tavily hoặc Exa. Mỗi truy vấn nhận tối đa `10`
 kết quả ứng viên. Tavily mặc định dùng `ultra-fast`, chỉ lấy đoạn tóm tắt và hệ thống trả kết quả
 hiện có sau ngân sách chờ mặc định `8` giây. Nguồn phù hợp được lập chỉ mục riêng theo
 tổ chức trước khi chạy đối chiếu. Không dùng lựa chọn này cho tài liệu nhạy cảm nếu chưa có chính

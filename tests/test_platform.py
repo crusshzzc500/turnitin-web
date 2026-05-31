@@ -31,7 +31,7 @@ from backend.search import OpenSearchBackend
 from backend.server import create_server
 from backend.storage import Storage, utc_now
 from backend.text import normalize_display_text
-from backend.web_discovery import WebDiscovery, build_queries
+from backend.web_discovery import DiscoveryResult, WebDiscovery, build_queries
 
 
 class LocalSiteHandler(BaseHTTPRequestHandler):
@@ -177,6 +177,7 @@ def settings_for(
     max_attempts: int = 3,
     retry_base_seconds: float = 0,
     tavily_api_key: str = "",
+    exa_api_key: str = "",
     public_mode: bool = False,
 ) -> Settings:
     return Settings(
@@ -191,6 +192,7 @@ def settings_for(
         crawler_max_attempts=max_attempts,
         crawler_retry_base_seconds=retry_base_seconds,
         tavily_api_key=tavily_api_key,
+        exa_api_key=exa_api_key,
         public_mode=public_mode,
     )
 
@@ -362,6 +364,74 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_exa_uses_instant_search_with_highlights_and_server_side_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, exa_api_key="exa-test-key"), storage)
+            captured: dict = {}
+
+            def fake_request(_url, payload, *, headers, timeout):
+                captured.update({"payload": payload, "headers": headers, "timeout": timeout})
+                return {"results": []}
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                discovery._fetch_exa("liêm chính học thuật", 10)
+            self.assertEqual(captured["payload"]["type"], "instant")
+            self.assertEqual(captured["payload"]["numResults"], 10)
+            self.assertEqual(captured["payload"]["contents"]["highlights"]["maxCharacters"], 1200)
+            self.assertEqual(captured["headers"]["x-api-key"], "exa-test-key")
+            self.assertEqual(captured["timeout"], 7.0)
+
+    def test_exa_fallback_runs_only_when_tavily_returns_too_few_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, tavily_api_key="tavily", exa_api_key="exa"), storage)
+            text = (
+                "Đoạn đầu tiên có đủ số lượng từ và chứa nội dung riêng để dùng làm truy vấn tìm kiếm công khai. "
+                "Đoạn thứ hai cũng có đủ số lượng từ nhưng mang thêm nhiều thuật ngữ học thuật khác nhau để kiểm tra. "
+                "Đoạn thứ ba tiếp tục bổ sung nội dung nhằm chắc chắn bộ chọn không gửi toàn bộ tài liệu ra bên ngoài."
+            )
+            primary = DiscoveryResult("tavily", True, True, ["primary"], 0, 0, "Tavily thiếu nguồn.", [])
+            fallback = DiscoveryResult(
+                "exa",
+                True,
+                True,
+                ["fallback"],
+                1,
+                0,
+                "Exa bổ sung nguồn.",
+                [{"id": 9, "title": "Nguồn Exa", "url": "https://example.org/exa"}],
+            )
+            with (
+                patch.object(discovery, "_tavily", return_value=primary),
+                patch.object(discovery, "_exa", return_value=fallback) as exa,
+            ):
+                result = discovery.discover_and_index(text, organization_id=1)
+            self.assertEqual(result["provider"], "tavily+exa")
+            self.assertEqual(result["indexed"], 1)
+            self.assertLessEqual(len(exa.call_args.args[0]), 2)
+
+    def test_exa_fallback_is_skipped_when_tavily_has_enough_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, tavily_api_key="tavily", exa_api_key="exa"), storage)
+            text = "Nội dung đủ dài để tạo truy vấn kiểm tra và xác minh bộ điều phối không gọi Exa khi Tavily đã đủ nguồn."
+            sources = [
+                {"id": index, "title": f"Nguồn {index}", "url": f"https://example.org/{index}"}
+                for index in range(4)
+            ]
+            primary = DiscoveryResult("tavily", True, True, ["primary"], 4, 0, "Tavily đủ nguồn.", sources)
+            with (
+                patch.object(discovery, "_tavily", return_value=primary),
+                patch.object(discovery, "_exa") as exa,
+            ):
+                result = discovery.discover_and_index(text, organization_id=1)
+            self.assertEqual(result["provider"], "tavily")
+            exa.assert_not_called()
+
     def test_tavily_uses_ultra_fast_snippets_without_raw_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -663,6 +733,9 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["searchBackend"], "sqlite-fts5")
                 self.assertEqual(health["webDiscoveryLimits"]["mode"], "ultra-fast")
                 self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 8.0)
+                self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 4)
+                self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 2)
+                self.assertEqual(health["webDiscoveryLimits"]["exaMode"], "instant")
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)
                 self.assertEqual(stats["sources"], 4)

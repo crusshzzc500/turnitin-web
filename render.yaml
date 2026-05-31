@@ -24,7 +24,15 @@ services:
         value: "8"
       - key: MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS
         value: "7"
+      - key: MINH_CHUNG_WEB_DISCOVERY_FALLBACK_MIN_SOURCES
+        value: "4"
+      - key: MINH_CHUNG_WEB_DISCOVERY_EXA_MAX_QUERIES
+        value: "2"
+      - key: MINH_CHUNG_WEB_DISCOVERY_EXA_MODE
+        value: "instant"
       - key: TAVILY_API_KEY
+        sync: false
+      - key: EXA_API_KEY
         sync: false
       - key: BRAVE_SEARCH_API_KEY
         sync: false
