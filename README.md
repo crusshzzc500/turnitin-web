@@ -80,7 +80,9 @@ Tavily được ưu tiên nếu cả hai key cùng tồn tại. Có thể điề
 
 Đặt `MINH_CHUNG_PUBLIC_MODE=1` cho website mở tự do. Server sẽ ép mọi khách về quyền sinh viên,
 không tin header chọn vai trò từ client, khóa API quản trị và không lưu bài nộp hoặc báo cáo.
-Chế độ nội bộ mặc định vẫn giữ ba vai trò demo để phát triển và kiểm thử.
+Deployment có biến `PORT` như Render mặc định bật chế độ này; có thể đặt rõ
+`MINH_CHUNG_PUBLIC_MODE=0` cho bản nội bộ. Chế độ cục bộ mặc định vẫn giữ ba vai trò demo để
+phát triển và kiểm thử.
 
 ## OCR cho PDF scan
 

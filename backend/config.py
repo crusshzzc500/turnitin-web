@@ -82,5 +82,5 @@ class Settings:
             ),
             analysis_job_workers=max(1, min(16, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_WORKERS", "4")))),
             analysis_job_ttl_seconds=max(60, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_TTL_SECONDS", "900"))),
-            public_mode=os.getenv("MINH_CHUNG_PUBLIC_MODE", "0") == "1",
+            public_mode=os.getenv("MINH_CHUNG_PUBLIC_MODE", "1" if platform_port else "0") == "1",
         )

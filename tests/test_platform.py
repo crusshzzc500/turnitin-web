@@ -285,11 +285,17 @@ class SimilarityAnalyzerTest(unittest.TestCase):
 class ConfigTest(unittest.TestCase):
     def test_render_port_enables_external_bind_and_public_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            with patch.dict(os.environ, {"PORT": "9123", "MINH_CHUNG_PUBLIC_MODE": "1"}, clear=True):
+            with patch.dict(os.environ, {"PORT": "9123"}, clear=True):
                 settings = Settings.from_env(Path(directory))
             self.assertEqual(settings.host, "0.0.0.0")
             self.assertEqual(settings.port, 9123)
             self.assertTrue(settings.public_mode)
+
+    def test_platform_public_mode_can_be_explicitly_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"PORT": "9123", "MINH_CHUNG_PUBLIC_MODE": "0"}, clear=True):
+                settings = Settings.from_env(Path(directory))
+            self.assertFalse(settings.public_mode)
 
 
 class SearchBackendTest(unittest.TestCase):

@@ -12,7 +12,8 @@
 Tạo Blueprint từ repository chứa file `render.yaml`, sau đó nhập `TAVILY_API_KEY` hoặc
 `BRAVE_SEARCH_API_KEY` trong phần Environment của Render. Không đưa API key vào Git hoặc ZIP.
 
-Render cung cấp biến `PORT`; máy chủ đã tự nhận biến này và bind `0.0.0.0`.
+Render cung cấp biến `PORT`; máy chủ đã tự nhận biến này, bind `0.0.0.0` và mặc định bật public
+mode an toàn. Có thể đặt rõ `MINH_CHUNG_PUBLIC_MODE=0` cho một deployment nội bộ riêng.
 
 `render.yaml` đặt giới hạn upload ứng dụng là `250 MB`. Reverse proxy và bộ nhớ của gói Render
 thực tế vẫn có thể áp giới hạn thấp hơn; với file lớn thường xuyên nên dùng object storage và
