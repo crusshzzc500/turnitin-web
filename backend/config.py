@@ -38,8 +38,8 @@ class Settings:
             root_dir=root,
             database_path=Path(os.getenv("MINH_CHUNG_DATABASE", data_dir / "minh_chung.db")),
             static_dir=root,
-            host=os.getenv("MINH_CHUNG_HOST", "127.0.0.1"),
-            port=int(os.getenv("MINH_CHUNG_PORT", "8765")),
+           host=os.getenv("MINH_CHUNG_HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", os.getenv("MINH_CHUNG_PORT", "8765"))),
             crawler_user_agent=os.getenv(
                 "MINH_CHUNG_CRAWLER_USER_AGENT",
                 "MinhChungResearchBot/0.1 (+contact: admin@example.invalid)",
