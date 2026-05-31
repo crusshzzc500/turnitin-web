@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Minh Chứng - Kiểm tra tương đồng văn bản</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#" aria-label="Minh Chứng">
+          <span class="brand-mark">M</span>
+          <span>
+            <strong>Minh Chứng</strong>
+            <small>Similarity checker</small>
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="Điều hướng chính">
+          <button class="nav-item active" type="button" data-view="checker">
+            <span class="nav-icon">⌂</span>
+            Kiểm tra mới
+          </button>
+          <button class="nav-item" type="button" data-view="history">
+            <span class="nav-icon">◷</span>
+            Lịch sử
+          </button>
+          <button class="nav-item" type="button" data-view="sources">
+            <span class="nav-icon">▤</span>
+            Kho nguồn
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="privacy-card">
+            <span class="privacy-icon">✓</span>
+            <div>
+              <strong>Bản mẫu riêng tư</strong>
+              <small>Dữ liệu chỉ xử lý trong trình duyệt.</small>
+            </div>
+          </div>
+          <div class="profile">
+            <div class="avatar">MN</div>
+            <div>
+              <strong>Không gian của bạn</strong>
+              <small>Bản thử nghiệm</small>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">KHÔNG GIAN KIỂM ĐỊNH</p>
+            <h1 id="page-title">Kiểm tra tài liệu</h1>
+          </div>
+          <div class="topbar-actions">
+            <span class="simple-mode-pill">Dùng tự do · không cần tài khoản</span>
+            <span id="backend-status" class="status-pill"><i></i> Đang kiểm tra máy chủ</span>
+          </div>
+        </header>
+
+        <section id="checker-view" class="view active">
+          <div class="intro-grid">
+            <article class="hero-card">
+              <div>
+                <p class="eyebrow">KIỂM TRA NHANH CHO HỌC TẬP</p>
+                <h2>Upload bài, quét nguồn,<br /><em>xem đoạn nào cần sửa.</em></h2>
+                <p>
+                  Giao diện đơn giản cho người lần đầu dùng: chọn tệp hoặc dán bài, bật quét web công khai nếu đã cấu hình API miễn phí, rồi xem báo cáo có màu đánh dấu rõ ràng.
+                </p>
+              </div>
+              <div class="hero-art" aria-hidden="true">
+                <span class="orbit orbit-one"></span>
+                <span class="orbit orbit-two"></span>
+                <span class="hero-score">%</span>
+              </div>
+            </article>
+
+            <article class="insight-card">
+              <span class="card-kicker">3 BƯỚC RẤT DỄ</span>
+              <h3>1. Chọn bài → 2. Bật quét web → 3. Đọc báo cáo.</h3>
+              <p>
+                Kết quả là gợi ý rà soát. Một đoạn giống nguồn khác chưa chắc là đạo văn nếu bạn đã trích dẫn đúng.
+              </p>
+            </article>
+          </div>
+
+          <section class="workspace-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">BƯỚC 01</p>
+                <h2>Chọn nội dung cần kiểm tra</h2>
+              </div>
+              <button id="load-sample" class="text-button" type="button">Dùng bài mẫu →</button>
+            </div>
+
+            <div class="upload-grid">
+              <label class="dropzone" for="file-input">
+                <input id="file-input" type="file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf" />
+                <span class="upload-mark">↑</span>
+                <strong>Thả tệp hoặc bấm để chọn</strong>
+                <small>Máy chủ đọc .txt, .md, .docx và .pdf, tối đa 10 MB</small>
+              </label>
+              <div class="paste-panel">
+                <label for="document-text">Hoặc dán nội dung vào đây</label>
+                <textarea
+                  id="document-text"
+                  rows="12"
+                  placeholder="Nhập nội dung bài viết, báo cáo hoặc tiểu luận..."
+                ></textarea>
+                <div class="textarea-footer">
+                  <span id="word-counter">0 từ</span>
+                  <span id="file-label">Chưa chọn tệp</span>
+                </div>
+              </div>
+            </div>
+
+            <section class="quick-options">
+              <label class="option-card highlight-option">
+                <input id="enable-web-search" type="checkbox" checked />
+                <span>
+                  <strong>Quét nguồn web công khai tự động</strong>
+                  <small>Cần TAVILY_API_KEY hoặc BRAVE_SEARCH_API_KEY trong máy chủ. Không có key thì web vẫn chạy bằng kho sẵn có.</small>
+                </span>
+              </label>
+              <label class="option-card">
+                <input id="index-submission" type="checkbox" />
+                <span>
+                  <strong>Lưu bài này vào kho đối chiếu</strong>
+                  <small>Tùy chọn. Mặc định không lưu bài của bạn vào kho nội bộ.</small>
+                </span>
+              </label>
+            </section>
+
+            <details id="source-adder" class="source-adder">
+              <summary>Thêm nguồn đối chiếu thủ công nếu cần</summary>
+              <div class="source-adder-grid">
+                <input id="custom-source-name" type="text" placeholder="Tên nguồn, ví dụ: Nội quy khoa" />
+                <input id="custom-source-url" type="url" placeholder="Đường dẫn nguồn (không bắt buộc)" />
+                <textarea
+                  id="custom-source-content"
+                  rows="5"
+                  placeholder="Dán nội dung nguồn để thử nghiệm..."
+                ></textarea>
+                <button id="add-source" class="secondary-button" type="button">Thêm vào kho nguồn</button>
+              </div>
+            </details>
+
+            <div class="action-row">
+              <p id="web-discovery-hint" class="web-discovery-hint">Mẹo: bật quét web khi kiểm tra bài dài hoặc bài lấy ý từ nhiều trang mạng.</p>
+              <button id="analyze-button" class="primary-button" type="button">
+                Tạo báo cáo tương đồng
+                <span>→</span>
+              </button>
+            </div>
+          </section>
+        </section>
+
+        <section id="report-view" class="view">
+          <button id="back-to-checker" class="back-button" type="button">← Kiểm tra tài liệu khác</button>
+          <button id="download-report-pdf" class="secondary-button report-download" type="button">Tải báo cáo PDF</button>
+
+          <div class="report-summary">
+            <article class="score-card">
+              <div class="score-ring" id="score-ring">
+                <div>
+                  <strong id="similarity-score">0%</strong>
+                  <span>tương đồng</span>
+                </div>
+              </div>
+              <div>
+                <p class="eyebrow">TỔNG QUAN BÁO CÁO</p>
+                <h2 id="score-label">Đang phân tích</h2>
+                <p id="score-description">Kết quả sẽ được tổng hợp sau khi xử lý tài liệu.</p>
+              </div>
+            </article>
+
+            <article class="metric-card">
+              <span>Số từ</span>
+              <strong id="metric-words">0</strong>
+              <small>trong tài liệu</small>
+            </article>
+            <article class="metric-card">
+              <span>Đoạn cần xem</span>
+              <strong id="metric-matches">0</strong>
+              <small>sau bộ lọc</small>
+            </article>
+            <article class="metric-card">
+              <span>Nguồn liên quan</span>
+              <strong id="metric-sources">0</strong>
+              <small>được tìm thấy</small>
+            </article>
+          </div>
+
+          <section class="report-layout">
+            <div class="document-column">
+              <div class="panel-heading document-heading">
+                <div>
+                  <p class="eyebrow">NỘI DUNG BÀI VIẾT</p>
+                  <h2>Chi tiết đối chiếu</h2>
+                </div>
+                <div class="legend">
+                  <span><i class="legend-dot high"></i>Cần rà soát</span>
+                  <span><i class="legend-dot excluded"></i>Đã loại trừ</span>
+                </div>
+              </div>
+              <article id="document-preview" class="document-preview"></article>
+            </div>
+
+            <aside class="report-sidebar">
+              <section class="filter-card">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">TINH CHỈNH KẾT QUẢ</p>
+                    <h3>Bộ lọc báo cáo</h3>
+                  </div>
+                </div>
+                <label class="switch-row">
+                  <span>
+                    <strong>Bỏ qua trích dẫn</strong>
+                    <small>Nội dung nằm trong dấu ngoặc kép</small>
+                  </span>
+                  <input id="filter-quotes" type="checkbox" checked />
+                  <i></i>
+                </label>
+                <label class="switch-row">
+                  <span>
+                    <strong>Bỏ qua tài liệu tham khảo</strong>
+                    <small>Loại trừ danh mục ở cuối bài</small>
+                  </span>
+                  <input id="filter-bibliography" type="checkbox" checked />
+                  <i></i>
+                </label>
+                <label class="range-row">
+                  <span>
+                    <strong>Độ dài tối thiểu</strong>
+                    <small>Chỉ hiện đoạn trùng từ <b id="minimum-words-label">8</b> từ</small>
+                  </span>
+                  <input id="filter-minimum" type="range" min="4" max="18" value="8" />
+                </label>
+              </section>
+
+              <section class="sources-card">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">NGUỒN ĐỐI CHIẾU</p>
+                    <h3>Các nguồn liên quan</h3>
+                  </div>
+                </div>
+                <div id="matched-sources" class="matched-sources"></div>
+              </section>
+              <section class="sources-card">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">CẢNH BÁO TOÀN VẸN</p>
+                    <h3>Thủ thuật cần rà soát</h3>
+                  </div>
+                </div>
+                <div id="integrity-flags" class="matched-sources"></div>
+              </section>
+            </aside>
+          </section>
+        </section>
+
+        <section id="history-view" class="view simple-view">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">NHẬT KÝ CỤC BỘ</p>
+              <h2>Lịch sử báo cáo</h2>
+            </div>
+            <button id="clear-history" class="text-button" type="button">Xóa lịch sử</button>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </section>
+
+        <section id="sources-view" class="view simple-view">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">KHO NGUỒN</p>
+              <h2>Nguồn web và nguồn thủ công</h2>
+            </div>
+          </div>
+          <p class="view-description">
+            Hệ thống có thể tự tìm nguồn web công khai qua API tìm kiếm miễn phí rồi lập chỉ mục để đối chiếu. Crawler thủ công vẫn tôn trọng robots.txt, giới hạn tốc độ và chặn mạng nội bộ.
+          </p>
+          <div class="platform-stats">
+            <article><span>Nguồn đã lập chỉ mục</span><strong id="platform-sources">0</strong></article>
+            <article><span>Bộ máy tìm kiếm</span><strong id="platform-search-backend">-</strong></article>
+            <article><span>Đoạn có thể tìm kiếm</span><strong id="platform-chunks">0</strong></article>
+            <article><span>Số từ trong kho</span><strong id="platform-words">0</strong></article>
+            <article><span>Phiên bản nguồn đã lưu</span><strong id="platform-versions">0</strong></article>
+            <article><span>URL đang chờ</span><strong id="platform-queued">0</strong></article>
+            <article><span>URL chờ thử lại</span><strong id="platform-retry-wait">0</strong></article>
+            <article><span>URL lỗi vĩnh viễn</span><strong id="platform-failed">0</strong></article>
+            <article><span>Bài nộp đã đồng ý lập chỉ mục</span><strong id="platform-submissions">0</strong></article>
+          </div>
+          <section id="crawler-card" class="crawler-card">
+            <div>
+              <p class="eyebrow">THU THẬP WEB CÓ KIỂM SOÁT</p>
+              <h3>Thêm URL hạt giống</h3>
+              <p>Nhập mỗi URL trên một dòng. Chỉ thu thập website bạn được phép lập chỉ mục.</p>
+            </div>
+            <textarea id="crawl-seeds" rows="4" placeholder="https://example.org/tai-lieu-cong-khai"></textarea>
+            <div class="crawler-actions">
+              <label>Số trang tối đa <input id="crawl-max-pages" type="number" min="1" max="10000" value="20" /></label>
+              <label>Độ sâu <input id="crawl-max-depth" type="number" min="0" max="5" value="1" /></label>
+              <label class="inline-check"><input id="crawl-use-sitemap" type="checkbox" /> URL là sitemap XML</label>
+              <button id="crawl-start" class="primary-button" type="button">Thêm URL và bắt đầu →</button>
+            </div>
+            <p id="crawl-status" class="crawl-status">Crawler chưa chạy.</p>
+          </section>
+          <section id="operations-card" class="operations-card">
+            <div class="operations-heading">
+              <div>
+                <p class="eyebrow">VẬN HÀNH CRAWLER</p>
+                <h3>Hàng đợi và lỗi gần nhất</h3>
+              </div>
+              <div class="operations-actions">
+                <button id="crawl-refresh" class="text-button" type="button">Làm mới</button>
+                <button id="search-reindex" class="text-button" type="button">Lập lại chỉ mục</button>
+                <button id="crawl-retry" class="secondary-button" type="button">Thử lại URL lỗi</button>
+              </div>
+            </div>
+            <div id="crawl-queue-summary" class="queue-summary"></div>
+            <div id="crawl-operations" class="operations-list"></div>
+          </section>
+          <section class="submission-card">
+            <p class="eyebrow">KHO BÀI NỘP NỘI BỘ</p>
+            <h3>Bài đã đồng ý dùng làm nguồn đối chiếu</h3>
+            <div id="submission-library" class="source-library compact-library"></div>
+          </section>
+          <section id="audit-card" class="operations-card">
+            <div class="operations-heading">
+              <div>
+                <p class="eyebrow">NHẬT KÝ KIỂM TOÁN</p>
+                <h3>Hoạt động gần nhất trong tổ chức</h3>
+              </div>
+            </div>
+            <div id="audit-events" class="operations-list"></div>
+          </section>
+          <div id="source-library" class="source-library"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

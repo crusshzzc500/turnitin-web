@@ -1,0 +1,2 @@
+"""Minh Chung backend package."""
+
