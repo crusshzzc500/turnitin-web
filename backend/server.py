@@ -23,7 +23,7 @@ from .ocr import ocr_status
 from .pdf_report import build_report_pdf
 from .search import SearchBackend, create_search_backend
 from .storage import Storage
-from .text import count_words
+from .text import count_words, normalize_display_text
 from .web_discovery import WebDiscovery
 
 
@@ -68,6 +68,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             self._handle_get()
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
         except AuthenticationError as error:
             self._send_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
         except AuthorizationError as error:
@@ -79,6 +81,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             self._handle_post()
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
         except AuthenticationError as error:
             self._send_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
         except AuthorizationError as error:
@@ -115,6 +119,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 self._audit(principal, "submission.delete", "submission", parts[2])
                 return
             self._send_json({"error": "Không tìm thấy API."}, HTTPStatus.NOT_FOUND)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
         except AuthenticationError as error:
             self._send_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
         except AuthorizationError as error:
@@ -145,6 +151,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "queries": self.context.settings.web_discovery_max_queries,
                         "resultsPerQuery": self.context.settings.web_discovery_max_results,
                         "parallelWorkers": self.context.settings.web_discovery_parallel_workers,
+                        "mode": self.context.settings.web_discovery_mode,
+                        "timeBudgetSeconds": self.context.settings.web_discovery_time_budget_seconds,
                     },
                 }
             )
@@ -349,7 +357,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         principal: Principal,
         progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
-        text = str(payload.get("text", "")).strip()
+        text = normalize_display_text(str(payload.get("text", ""))).strip()
         if count_words(text) < 20:
             raise ValueError("Tài liệu cần có ít nhất 20 từ.")
         settings = payload.get("settings") or {}
@@ -419,7 +427,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
     ) -> dict[str, Any]:
         self._progress(progress, 8, "extracting", "Đang đọc nội dung tệp.")
         extracted = extract_document(filename, content)
-        text = extracted["text"].strip()
+        text = normalize_display_text(extracted["text"]).strip()
         if count_words(text) < 20:
             raise ValueError("Không đọc được đủ nội dung văn bản từ tệp.")
         self._progress(progress, 18, "extracting", "Đã trích xuất nội dung tệp.")
@@ -649,31 +657,44 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             return
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         body = file_path.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", f"{content_type}; charset=utf-8" if content_type.startswith("text/") else content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        self._write_response(
+            body,
+            HTTPStatus.OK,
+            [
+                ("Content-Type", f"{content_type}; charset=utf-8" if content_type.startswith("text/") else content_type),
+                ("Content-Length", str(len(body))),
+                ("Cache-Control", "no-store"),
+            ],
+        )
 
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        self._write_response(
+            body,
+            status,
+            [
+                ("Content-Type", "application/json; charset=utf-8"),
+                ("Content-Length", str(len(body))),
+                ("Cache-Control", "no-store"),
+            ],
+        )
 
     def _send_bytes(self, body: bytes, content_type: str, *, filename: str | None = None) -> None:
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+        headers = [("Content-Type", content_type), ("Content-Length", str(len(body)))]
         if filename:
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+            headers.append(("Content-Disposition", f'attachment; filename="{filename}"'))
+        headers.append(("Cache-Control", "no-store"))
+        self._write_response(body, HTTPStatus.OK, headers)
+
+    def _write_response(self, body: bytes, status: HTTPStatus, headers: list[tuple[str, str]]) -> None:
+        try:
+            self.send_response(status)
+            for name, value in headers:
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
 
     @staticmethod
     def _query_limit(query: dict[str, list[str]], default: int = 100) -> int:

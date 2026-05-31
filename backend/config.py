@@ -32,6 +32,9 @@ class Settings:
     web_discovery_max_results: int = 10
     web_discovery_max_content_chars: int = 250_000
     web_discovery_parallel_workers: int = 6
+    web_discovery_mode: str = "ultra-fast"
+    web_discovery_time_budget_seconds: float = 8.0
+    web_discovery_request_timeout_seconds: float = 7.0
     analysis_job_workers: int = 4
     analysis_job_ttl_seconds: int = 900
     public_mode: bool = False
@@ -79,6 +82,19 @@ class Settings:
             web_discovery_parallel_workers=max(
                 1,
                 min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS", "6"))),
+            ),
+            web_discovery_mode=(
+                os.getenv("MINH_CHUNG_WEB_DISCOVERY_MODE", "ultra-fast")
+                if os.getenv("MINH_CHUNG_WEB_DISCOVERY_MODE", "ultra-fast") in {"basic", "advanced", "fast", "ultra-fast"}
+                else "ultra-fast"
+            ),
+            web_discovery_time_budget_seconds=max(
+                1.0,
+                min(30.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS", "8"))),
+            ),
+            web_discovery_request_timeout_seconds=max(
+                1.0,
+                min(20.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS", "7"))),
             ),
             analysis_job_workers=max(1, min(16, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_WORKERS", "4")))),
             analysis_job_ttl_seconds=max(60, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_TTL_SECONDS", "900"))),

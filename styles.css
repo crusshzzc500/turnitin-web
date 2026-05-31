@@ -452,6 +452,36 @@ button {
   grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1.35fr);
 }
 
+.checker-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.checker-steps span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 99px;
+  color: #4f625c;
+  background: #f2f7f4;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.checker-steps b {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--forest);
+  font-size: 10px;
+}
+
 .dropzone {
   display: grid;
   min-height: 260px;
@@ -747,6 +777,19 @@ input[type="url"]:focus {
   background: #f6faf6;
 }
 
+.option-badge {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 3px 6px;
+  border-radius: 99px;
+  color: #fff;
+  background: #428c74;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
 .web-discovery-hint {
   max-width: 650px;
   margin: 0;
@@ -762,7 +805,7 @@ input[type="url"]:focus {
   padding: 13px 17px;
 }
 
-.primary-button span {
+.primary-button .button-arrow {
   font-size: 18px;
   line-height: 0.8;
 }
@@ -781,6 +824,24 @@ input[type="url"]:focus {
   display: grid;
   gap: 13px;
   grid-template-columns: minmax(360px, 2.15fr) repeat(3, minmax(125px, 0.72fr));
+}
+
+.report-assurance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 13px;
+  padding: 11px 13px;
+  border: 1px solid #d5e6df;
+  border-radius: 10px;
+  color: #4c675e;
+  background: #f6fbf8;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.report-assurance p {
+  margin: 0;
 }
 
 .score-card {
@@ -923,7 +984,7 @@ input[type="url"]:focus {
   padding: 29px 31px;
   color: #3f4945;
   background: #fff;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Times New Roman", Times, serif;
   font-size: 15px;
   line-height: 1.92;
   white-space: pre-wrap;

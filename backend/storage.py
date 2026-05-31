@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlparse
 
-from .text import chunk_document, count_words, fold_text, fts_query, normalize_text, search_terms
+from .text import chunk_document, count_words, fold_text, fts_query, normalize_display_text, normalize_text, search_terms
 
 
 def utc_now() -> str:
@@ -245,6 +245,8 @@ class Storage:
         metadata: dict[str, Any] | None = None,
         organization_id: int | None = None,
     ) -> int:
+        title = normalize_display_text(title)
+        text_content = normalize_display_text(text_content)
         now = utc_now()
         digest = hashlib.sha256(text_content.encode("utf-8")).hexdigest()
         words = count_words(text_content)

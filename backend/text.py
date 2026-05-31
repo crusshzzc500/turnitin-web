@@ -50,6 +50,30 @@ VIETNAMESE_STOPWORDS = {
     "với",
 }
 
+MOJIBAKE_MARKERS = ("Ã", "Â", "Ä", "áº", "á»", "â€", "ðŸ")
+
+
+def _mojibake_score(value: str) -> int:
+    return sum(value.count(marker) for marker in MOJIBAKE_MARKERS) + (value.count("\ufffd") * 4)
+
+
+def normalize_display_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFC", value.replace("\r\n", "\n").replace("\r", "\n"))
+    baseline_score = _mojibake_score(normalized)
+    if not baseline_score:
+        return normalized
+    for encoding in ("latin-1", "cp1252"):
+        try:
+            candidate = normalized.encode(encoding).decode("utf-8")
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+        candidate = unicodedata.normalize("NFC", candidate)
+        score = _mojibake_score(candidate)
+        if score < baseline_score:
+            normalized = candidate
+            baseline_score = score
+    return normalized
+
 
 def normalize_text(value: str) -> str:
     return " ".join(tokenize(value))

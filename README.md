@@ -30,7 +30,10 @@ Cách chạy thủ công:
 - Đoạn tô màu, tỷ lệ tương đồng, danh sách nguồn và lịch sử báo cáo phía server.
 - Xuất báo cáo PDF có thông tin tổ chức, điểm tương đồng, nguồn, đoạn đối chiếu và cảnh báo liêm chính.
 - PDF scan ít chữ tự thử OCR khi máy chủ có Tesseract và `pdf2image`.
-- Quét bổ sung nguồn web công khai qua Tavily hoặc Brave khi người dùng chủ động bật.
+- Quét bổ sung nguồn web công khai qua Tavily hoặc Brave khi người dùng chủ động bật; Tavily dùng chế độ
+  `ultra-fast`, chỉ lấy đoạn tóm tắt và dừng chờ nguồn chậm sau ngân sách thời gian cấu hình.
+- Chuẩn hóa Unicode cho văn bản đầu vào có lỗi mã hóa có thể phục hồi; nội dung báo cáo hiển thị bằng
+  Times New Roman.
 - Bộ lọc trích dẫn, tài liệu tham khảo và độ dài tối thiểu.
 - Thêm nguồn riêng từ giao diện.
 - Kho bài nộp nội bộ chỉ lập chỉ mục khi người dùng đồng ý; có thao tác rút bài
@@ -71,10 +74,14 @@ $env:TAVILY_API_KEY = '...'
 $env:BRAVE_SEARCH_API_KEY = '...'
 ```
 
-Tavily được ưu tiên nếu cả hai key cùng tồn tại. Có thể điều chỉnh giới hạn bằng
+Tavily được ưu tiên nếu cả hai key cùng tồn tại. Mặc định Tavily dùng `ultra-fast`, không yêu cầu tải
+`raw_content`, và WebDiscovery trả kết quả hiện có sau tối đa `8` giây thay vì chờ một truy vấn chậm.
+Có thể điều chỉnh giới hạn bằng
 `MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES`, `MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS` và
 `MINH_CHUNG_WEB_DISCOVERY_MAX_CONTENT_CHARS`. Số truy vấn đồng thời dùng
-`MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS`.
+`MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS`. Chế độ Tavily và thời gian chờ dùng
+`MINH_CHUNG_WEB_DISCOVERY_MODE`, `MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS` và
+`MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS`.
 
 ## Chế độ demo công khai
 

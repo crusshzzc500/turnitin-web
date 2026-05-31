@@ -8,6 +8,7 @@
 - API crawler, reindex, thêm nguồn thủ công và nhật ký kiểm toán bị khóa.
 - Máy chủ không lưu bài nộp hoặc báo cáo của khách.
 - Tùy chọn quét web mặc định tắt; chỉ gửi đoạn trích sang Tavily hoặc Brave khi khách chủ động bật.
+- Tavily dùng `ultra-fast`, không lấy toàn bộ nội dung trang và dừng chờ nguồn chậm sau `8` giây.
 
 Tạo Blueprint từ repository chứa file `render.yaml`, sau đó nhập `TAVILY_API_KEY` hoặc
 `BRAVE_SEARCH_API_KEY` trong phần Environment của Render. Không đưa API key vào Git hoặc ZIP.

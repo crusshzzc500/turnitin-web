@@ -171,6 +171,7 @@ def build_report_pdf(report: dict[str, Any], *, organization_name: str) -> bytes
 
 def _register_unicode_font(pdfmetrics: Any, tt_font: Any) -> str:
     candidates = [
+        Path("C:/Windows/Fonts/times.ttf"),
         Path("C:/Windows/Fonts/arial.ttf"),
         Path("C:/Windows/Fonts/segoeui.ttf"),
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),

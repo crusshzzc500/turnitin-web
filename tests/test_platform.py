@@ -14,7 +14,7 @@ import zipfile
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -30,6 +30,7 @@ from backend.jobs import AnalysisJobManager
 from backend.search import OpenSearchBackend
 from backend.server import create_server
 from backend.storage import Storage, utc_now
+from backend.text import normalize_display_text
 from backend.web_discovery import WebDiscovery, build_queries
 
 
@@ -361,6 +362,23 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_tavily_uses_ultra_fast_snippets_without_raw_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, tavily_api_key="test-key"), storage)
+            captured: dict = {}
+
+            def fake_request(_url, payload, *, headers, timeout):
+                captured.update({"payload": payload, "headers": headers, "timeout": timeout})
+                return {"results": []}
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                discovery._fetch_tavily("liêm chính học thuật", 10)
+            self.assertEqual(captured["payload"]["search_depth"], "ultra-fast")
+            self.assertFalse(captured["payload"]["include_raw_content"])
+            self.assertEqual(captured["timeout"], 7.0)
+
     def test_build_queries_selects_a_small_number_of_excerpts(self) -> None:
         text = (
             "Đoạn đầu tiên có đủ số lượng từ và chứa nội dung riêng để dùng làm truy vấn tìm kiếm công khai. "
@@ -446,6 +464,52 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertGreaterEqual(max_active, 2)
             self.assertEqual(result["provider"], "tavily")
             self.assertEqual(updates[-1][:2], (3, 3))
+
+    def test_tavily_returns_partial_results_after_time_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            settings = replace(
+                settings_for(root, tavily_api_key="test-key"),
+                web_discovery_max_queries=3,
+                web_discovery_parallel_workers=3,
+                web_discovery_time_budget_seconds=0.03,
+            )
+            discovery = WebDiscovery(settings, storage)
+            text = (
+                "Đoạn thứ nhất có đủ từ riêng biệt để tạo truy vấn tìm kiếm công khai và đo thời gian phản hồi. "
+                "Đoạn thứ hai bổ sung thuật ngữ khác nhau nhằm tạo thêm truy vấn tìm nguồn chạy song song. "
+                "Đoạn thứ ba tiếp tục cung cấp nội dung độc lập để xác minh giới hạn chờ được áp dụng."
+            )
+
+            def slow_request(*_args, **_kwargs) -> dict:
+                time.sleep(0.15)
+                return {"results": []}
+
+            started = time.monotonic()
+            with patch.object(WebDiscovery, "_json_request", side_effect=slow_request):
+                result = discovery.discover_and_index(text, organization_id=1)
+            self.assertLess(time.monotonic() - started, 0.12)
+            self.assertIn("Đã dừng chờ", result["message"])
+
+
+class TextDisplayTest(unittest.TestCase):
+    def test_repairs_reversible_utf8_mojibake_and_preserves_valid_vietnamese(self) -> None:
+        self.assertEqual(normalize_display_text("LiÃªm chÃ­nh há»c thuáº­t"), "Liêm chính học thuật")
+        self.assertEqual(normalize_display_text("Liêm chính học thuật"), "Liêm chính học thuật")
+
+
+class ResponseWriterTest(unittest.TestCase):
+    def test_broken_pipe_is_treated_as_client_disconnect(self) -> None:
+        from backend.server import AppRequestHandler
+
+        handler = AppRequestHandler.__new__(AppRequestHandler)
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock(side_effect=BrokenPipeError)
+        handler.close_connection = False
+        handler._write_response(b"ok", 200, [])
+        self.assertTrue(handler.close_connection)
 
 
 class AnalysisJobManagerTest(unittest.TestCase):
@@ -597,6 +661,8 @@ class ApiTest(unittest.TestCase):
                 )
                 self.assertTrue(health["ok"])
                 self.assertEqual(health["searchBackend"], "sqlite-fts5")
+                self.assertEqual(health["webDiscoveryLimits"]["mode"], "ultra-fast")
+                self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 8.0)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)
                 self.assertEqual(stats["sources"], 4)

@@ -3,13 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
 
-from .text import count_words, split_sentences
+from .text import count_words, normalize_display_text, split_sentences
 
 
 STOPWORDS = {
@@ -125,9 +125,14 @@ class WebDiscovery:
         seen_urls: set[str] = set()
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
-        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        timed_out = 0
+        executor = ThreadPoolExecutor(max_workers=max(1, workers))
+        try:
             pending = {executor.submit(self._fetch_tavily, query, max_results): query for query in queries}
-            for completed, future in enumerate(as_completed(pending), start=1):
+            for completed, future in enumerate(
+                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                start=1,
+            ):
                 query = pending[future]
                 try:
                     data = future.result()
@@ -142,9 +147,9 @@ class WebDiscovery:
                         query=query,
                         canonical_url=str(item.get("url") or ""),
                         title=str(item.get("title") or ""),
-                        content=str(item.get("raw_content") or item.get("content") or ""),
+                        content=str(item.get("content") or item.get("raw_content") or ""),
                         organization_id=organization_id,
-                        minimum_words=40,
+                        minimum_words=12,
                         seen_urls=seen_urls,
                     )
                     if indexed:
@@ -153,12 +158,20 @@ class WebDiscovery:
                         skipped += 1
                 if progress_callback:
                     progress_callback(completed, len(queries), len(sources))
+        except FuturesTimeoutError:
+            timed_out = sum(not future.done() for future in pending)
+        finally:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
         message = (
             f"Đã tìm và lập chỉ mục {len(sources)} nguồn web công khai qua Tavily."
             if sources else "Tavily không trả về nguồn đủ nội dung để lập chỉ mục."
         )
         if errors:
             message += f" Có {len(errors)} truy vấn gặp lỗi."
+        if timed_out:
+            message += f" Đã dừng chờ {timed_out} truy vấn chậm để trả báo cáo sớm."
         return DiscoveryResult("tavily", True, True, queries, len(sources), skipped, message, sources)
 
     def _brave(
@@ -173,9 +186,14 @@ class WebDiscovery:
         seen_urls: set[str] = set()
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
-        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        timed_out = 0
+        executor = ThreadPoolExecutor(max_workers=max(1, workers))
+        try:
             pending = {executor.submit(self._fetch_brave, query, max_results): query for query in queries}
-            for completed, future in enumerate(as_completed(pending), start=1):
+            for completed, future in enumerate(
+                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                start=1,
+            ):
                 query = pending[future]
                 try:
                     data = future.result()
@@ -203,12 +221,20 @@ class WebDiscovery:
                         skipped += 1
                 if progress_callback:
                     progress_callback(completed, len(queries), len(sources))
+        except FuturesTimeoutError:
+            timed_out = sum(not future.done() for future in pending)
+        finally:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
         message = (
             f"Đã lập chỉ mục {len(sources)} kết quả tóm tắt từ Brave."
             if sources else "Brave không trả về nguồn đủ nội dung để lập chỉ mục."
         )
         if errors:
             message += f" Có {len(errors)} truy vấn gặp lỗi."
+        if timed_out:
+            message += f" Đã dừng chờ {timed_out} truy vấn chậm để trả báo cáo sớm."
         return DiscoveryResult("brave", True, True, queries, len(sources), skipped, message, sources)
 
     def _fetch_tavily(self, query: str, max_results: int) -> dict[str, Any]:
@@ -216,20 +242,20 @@ class WebDiscovery:
             "https://api.tavily.com/search",
             {
                 "query": query,
-                "search_depth": "basic",
+                "search_depth": self.settings.web_discovery_mode,
                 "max_results": max_results,
-                "include_raw_content": True,
+                "include_raw_content": False,
                 "include_answer": False,
             },
             headers={"Authorization": f"Bearer {self.settings.tavily_api_key}"},
-            timeout=20,
+            timeout=self.settings.web_discovery_request_timeout_seconds,
         )
 
     def _fetch_brave(self, query: str, max_results: int) -> dict[str, Any]:
         return self._get_json(
             f"https://api.search.brave.com/res/v1/web/search?q={quote_plus(query)}&count={max_results}",
             headers={"X-Subscription-Token": self.settings.brave_search_api_key},
-            timeout=15,
+            timeout=self.settings.web_discovery_request_timeout_seconds,
         )
 
     def _index_candidate(
@@ -249,7 +275,8 @@ class WebDiscovery:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or canonical_url in seen_urls:
             return None
         seen_urls.add(canonical_url)
-        content = content.strip()[: self.settings.web_discovery_max_content_chars]
+        title = normalize_display_text(title)
+        content = normalize_display_text(content).strip()[: self.settings.web_discovery_max_content_chars]
         if count_words(content) < minimum_words:
             return None
         namespace = str(organization_id) if organization_id is not None else "public"

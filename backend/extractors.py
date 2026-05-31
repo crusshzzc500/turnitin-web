@@ -7,7 +7,7 @@ from typing import Any
 
 from .integrity import scan_text
 from .ocr import extract_pdf_text_with_ocr
-from .text import count_words
+from .text import count_words, normalize_display_text
 
 
 class UnsupportedDocumentError(ValueError):
@@ -17,10 +17,10 @@ class UnsupportedDocumentError(ValueError):
 def _decode_text(content: bytes) -> str:
     for encoding in ("utf-8-sig", "utf-8", "utf-16", "cp1258", "latin-1"):
         try:
-            return content.decode(encoding)
+            return normalize_display_text(content.decode(encoding))
         except UnicodeDecodeError:
             continue
-    return content.decode("utf-8", errors="replace")
+    return normalize_display_text(content.decode("utf-8", errors="replace"))
 
 
 def extract_document(filename: str, content: bytes) -> dict[str, Any]:
@@ -50,6 +50,7 @@ def _extract_pdf(filename: str, content: bytes) -> dict[str, Any]:
         metadata["ocr"] = ocr_result["metadata"]
         if count_words(ocr_result["text"]) > count_words(text):
             text = ocr_result["text"]
+    text = normalize_display_text(text)
     return {"text": text, "metadata": metadata, "integrityFlags": scan_text(text)}
 
 
@@ -62,7 +63,7 @@ def _extract_docx(filename: str, content: bytes) -> dict[str, Any]:
 
     _validate_docx_archive(content)
     document = Document(io.BytesIO(content))
-    paragraphs = [paragraph.text for paragraph in document.paragraphs]
+    paragraphs = [normalize_display_text(paragraph.text) for paragraph in document.paragraphs]
     flags = scan_text("\n".join(paragraphs))
     hidden_runs = 0
     white_runs = 0

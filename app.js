@@ -77,6 +77,7 @@ const elements = {
   uploadLimitLabel: document.querySelector("#upload-limit-label"),
   wordCounter: document.querySelector("#word-counter"),
   analyzeButton: document.querySelector("#analyze-button"),
+  analyzeButtonLabel: document.querySelector("#analyze-button-label"),
   analysisProgress: document.querySelector("#analysis-progress"),
   analysisProgressTitle: document.querySelector("#analysis-progress-title"),
   analysisProgressValue: document.querySelector("#analysis-progress-value"),
@@ -104,6 +105,7 @@ const elements = {
   metricWords: document.querySelector("#metric-words"),
   metricMatches: document.querySelector("#metric-matches"),
   metricSources: document.querySelector("#metric-sources"),
+  reportDiscoverySummary: document.querySelector("#report-discovery-summary"),
   matchedSources: document.querySelector("#matched-sources"),
   integrityFlags: document.querySelector("#integrity-flags"),
   sourceLibrary: document.querySelector("#source-library"),
@@ -144,6 +146,15 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch {
+    return "";
+  }
 }
 
 function tokenize(value) {
@@ -278,6 +289,7 @@ function applySessionUI() {
   const access = permissions();
   const publicMode = Boolean(state.health?.publicMode);
   const maxQueries = Number(state.health?.webDiscoveryLimits?.queries || 6);
+  const timeBudget = Number(state.health?.webDiscoveryLimits?.timeBudgetSeconds || 8);
   updateUploadLimit();
   elements.sourceAdder.hidden = !access.manageSources;
   elements.crawlerCard.hidden = !access.manageCrawler;
@@ -290,7 +302,7 @@ function applySessionUI() {
   const providers = state.health?.webDiscovery || {};
   const discoveryMessage = state.report?.webDiscovery?.message || (
     providers.tavily || providers.brave
-      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống quét song song tối đa ${maxQueries} đoạn trích qua nhà cung cấp tìm kiếm.`
+      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống quét nhanh tối đa ${maxQueries} đoạn trích và dừng chờ nguồn chậm sau ${timeBudget} giây.`
       : "Chưa cấu hình Tavily hoặc Brave. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
   );
   elements.webDiscoveryHint.textContent = publicMode
@@ -490,6 +502,10 @@ function renderReport() {
   elements.metricWords.textContent = totalWords.toLocaleString("vi-VN");
   elements.metricMatches.textContent = matchedSegments.length;
   elements.metricSources.textContent = sources.length;
+  const discovery = state.report.webDiscovery;
+  elements.reportDiscoverySummary.textContent = discovery
+    ? `${discovery.message} Đã tạo ${discovery.queries?.length || 0} truy vấn và ghi nhận ${discovery.indexed || 0} nguồn web.`
+    : "Báo cáo dùng kho nguồn hiện có. Bật quét web khi bạn muốn tìm thêm nguồn công khai.";
 
   elements.documentPreview.innerHTML = segments
     .map((segment) => {
@@ -516,12 +532,14 @@ function renderReport() {
   elements.matchedSources.innerHTML = sources
     .map((source) => {
       const share = totalWords ? Math.round((source.matchedWords / totalWords) * 100) : 0;
+      const sourceUrl = safeExternalUrl(source.url || "");
+      const sourceLabel = escapeHtml(source.url || "Nguồn do người dùng thêm");
       return `
         <article class="source-result">
           <div class="source-result-top">
             <div>
               <strong>${escapeHtml(source.title)}</strong>
-              <small>${escapeHtml(source.url || "Nguồn do người dùng thêm")}</small>
+              <small>${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">${sourceLabel}</a>` : sourceLabel}</small>
             </div>
             <span class="source-number">${source.numbers.join(",")}</span>
           </div>
@@ -946,6 +964,7 @@ elements.analyzeButton.addEventListener("click", async () => {
     return;
   }
   elements.analyzeButton.disabled = true;
+  elements.analyzeButtonLabel.textContent = "Đang kiểm tra...";
   setAnalysisProgress({ progress: 1, phase: "queued", message: "Đang xếp tài liệu vào hàng xử lý." });
   try {
     if (state.pendingFile && state.backendAvailable) {
@@ -971,6 +990,7 @@ elements.analyzeButton.addEventListener("click", async () => {
     showToast(error.message);
   } finally {
     elements.analyzeButton.disabled = false;
+    elements.analyzeButtonLabel.textContent = "Kiểm tra ngay";
   }
 });
 

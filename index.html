@@ -110,6 +110,12 @@
               <button id="load-sample" class="text-button" type="button">Dùng bài mẫu →</button>
             </div>
 
+            <div class="checker-steps" aria-label="Ba bước kiểm tra tài liệu">
+              <span><b>1</b> Chọn bài viết</span>
+              <span><b>2</b> Bật quét web nếu cần</span>
+              <span><b>3</b> Xem báo cáo</span>
+            </div>
+
             <div class="upload-grid">
               <label class="dropzone" for="file-input">
                 <input id="file-input" type="file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf" />
@@ -150,7 +156,8 @@
                 <input id="enable-web-search" type="checkbox" />
                 <span>
                   <strong>Quét thêm nguồn web công khai</strong>
-                  <small>Tùy chọn. Khi bật, tối đa 6 đoạn trích nổi bật được quét song song qua Tavily hoặc Brave để tìm nhiều nguồn hơn. Mặc định: tắt.</small>
+                  <em class="option-badge">QUÉT NHANH</em>
+                  <small>Tùy chọn. Khi bật, tối đa 6 đoạn trích nổi bật được quét song song và dừng chờ nguồn chậm sau 8 giây. Mặc định: tắt.</small>
                 </span>
               </label>
               <label class="option-card">
@@ -176,8 +183,8 @@
             <div class="action-row">
               <p id="web-discovery-hint" class="web-discovery-hint">Quét web đang tắt để bảo vệ riêng tư. Bật khi bạn muốn tìm thêm nguồn công khai.</p>
               <button id="analyze-button" class="primary-button" type="button">
-                Tạo báo cáo tương đồng
-                <span>→</span>
+                <span id="analyze-button-label">Kiểm tra ngay</span>
+                <span class="button-arrow">→</span>
               </button>
             </div>
           </section>
@@ -217,6 +224,11 @@
               <strong id="metric-sources">0</strong>
               <small>được tìm thấy</small>
             </article>
+          </div>
+
+          <div class="report-assurance">
+            <p id="report-discovery-summary">Kết quả đối chiếu đã sẵn sàng để rà soát.</p>
+            <p>Văn bản báo cáo được hiển thị bằng Times New Roman.</p>
           </div>
 
           <section class="report-layout">

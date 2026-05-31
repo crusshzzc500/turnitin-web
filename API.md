@@ -73,7 +73,8 @@ Ví dụ phân tích:
 
 `enableWebSearch` cũng mặc định là `false`. Khi đặt thành `true`, tối đa `6` đoạn trích nổi bật
 được gửi song song sang Tavily hoặc Brave để tìm nguồn công khai. Mỗi truy vấn nhận tối đa `10`
-kết quả ứng viên. Nguồn phù hợp được lập chỉ mục riêng theo
+kết quả ứng viên. Tavily mặc định dùng `ultra-fast`, chỉ lấy đoạn tóm tắt và hệ thống trả kết quả
+hiện có sau ngân sách chờ mặc định `8` giây. Nguồn phù hợp được lập chỉ mục riêng theo
 tổ chức trước khi chạy đối chiếu. Không dùng lựa chọn này cho tài liệu nhạy cảm nếu chưa có chính
 sách xử lý dữ liệu với nhà cung cấp tìm kiếm.
 
