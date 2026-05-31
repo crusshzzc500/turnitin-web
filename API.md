@@ -71,13 +71,13 @@ Ví dụ phân tích:
 `indexForComparison` mặc định là `false`. Chỉ đặt thành `true` sau khi người nộp
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.
 
-`enableWebSearch` cũng mặc định là `false`. Khi đặt thành `true`, tối đa `6` đoạn trích nổi bật
+`enableWebSearch` cũng mặc định là `false`. Khi đặt thành `true`, tối đa `10` đoạn trích nổi bật
 được gửi song song sang Tavily để tìm nguồn công khai. Nếu Tavily thiếu nguồn hoặc không dùng được,
-Exa `instant` fallback nhận tối đa `2` truy vấn và chỉ trả `highlights` để tiết kiệm quota miễn phí.
+Exa `instant` fallback nhận tối đa `3` truy vấn và chỉ trả `highlights` để tiết kiệm quota miễn phí.
 Nếu tổng nguồn vẫn thiếu, Serper fallback chỉ nhận tối đa `1` truy vấn. Brave là dự phòng tiếp theo
 khi không có Tavily, Exa hoặc Serper. Mỗi truy vấn nhận tối đa `10`
-kết quả ứng viên. Tavily mặc định dùng `ultra-fast`, chỉ lấy đoạn tóm tắt và hệ thống trả kết quả
-hiện có sau ngân sách chờ mặc định `8` giây. Nguồn phù hợp được lập chỉ mục riêng theo
+kết quả ứng viên. Tavily mặc định dùng `fast`, chỉ lấy đoạn tóm tắt và hệ thống trả kết quả
+hiện có sau ngân sách chờ mặc định `150` giây. Nguồn phù hợp được lập chỉ mục riêng theo
 tổ chức trước khi chạy đối chiếu. Không dùng lựa chọn này cho tài liệu nhạy cảm nếu chưa có chính
 sách xử lý dữ liệu với nhà cung cấp tìm kiếm.
 

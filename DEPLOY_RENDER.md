@@ -8,8 +8,8 @@
 - API crawler, reindex, thêm nguồn thủ công và nhật ký kiểm toán bị khóa.
 - Máy chủ không lưu bài nộp hoặc báo cáo của khách.
 - Tùy chọn quét web mặc định tắt; chỉ gửi đoạn trích sang Tavily, Exa, Serper hoặc Brave khi khách chủ động bật.
-- Tavily dùng `ultra-fast`, không lấy toàn bộ nội dung trang và dừng chờ nguồn chậm sau `8` giây.
-- Exa chỉ chạy fallback khi Tavily thiếu nguồn, dùng `instant`, lấy `highlights` và nhận tối đa `2`
+- Tavily dùng `fast`, không lấy toàn bộ nội dung trang và có ngân sách chờ tối đa `150` giây.
+- Exa chỉ chạy fallback khi Tavily thiếu nguồn, dùng `instant`, lấy `highlights` và nhận tối đa `3`
   truy vấn mỗi báo cáo để tiết kiệm quota miễn phí.
 - Serper chỉ chạy fallback cuối nếu tổng nguồn Tavily và Exa vẫn thiếu, nhận tối đa `1` truy vấn mỗi báo cáo.
 

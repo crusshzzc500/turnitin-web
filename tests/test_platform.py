@@ -382,7 +382,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(captured["url"], "https://google.serper.dev/search")
             self.assertEqual(captured["payload"], {"q": "academic integrity", "num": 10})
             self.assertEqual(captured["headers"]["X-API-KEY"], "serper-test-key")
-            self.assertEqual(captured["timeout"], 7.0)
+            self.assertEqual(captured["timeout"], 45.0)
 
     def test_serper_hard_caps_queries_even_if_called_with_more_than_one(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -411,7 +411,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(captured["payload"]["numResults"], 10)
             self.assertEqual(captured["payload"]["contents"]["highlights"]["maxCharacters"], 1200)
             self.assertEqual(captured["headers"]["x-api-key"], "exa-test-key")
-            self.assertEqual(captured["timeout"], 7.0)
+            self.assertEqual(captured["timeout"], 45.0)
 
     def test_exa_fallback_runs_only_when_tavily_returns_too_few_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -441,7 +441,7 @@ class WebDiscoveryTest(unittest.TestCase):
                 result = discovery.discover_and_index(text, organization_id=1)
             self.assertEqual(result["provider"], "tavily+exa")
             self.assertEqual(result["indexed"], 1)
-            self.assertLessEqual(len(exa.call_args.args[0]), 2)
+            self.assertLessEqual(len(exa.call_args.args[0]), 3)
 
     def test_exa_fallback_is_skipped_when_tavily_has_enough_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -454,9 +454,9 @@ class WebDiscoveryTest(unittest.TestCase):
             text = "Nội dung đủ dài để tạo truy vấn kiểm tra và xác minh bộ điều phối không gọi Exa khi Tavily đã đủ nguồn."
             sources = [
                 {"id": index, "title": f"Nguồn {index}", "url": f"https://example.org/{index}"}
-                for index in range(4)
+                for index in range(8)
             ]
-            primary = DiscoveryResult("tavily", True, True, ["primary"], 4, 0, "Tavily đủ nguồn.", sources)
+            primary = DiscoveryResult("tavily", True, True, ["primary"], 8, 0, "Tavily đủ nguồn.", sources)
             with (
                 patch.object(discovery, "_tavily", return_value=primary),
                 patch.object(discovery, "_exa") as exa,
@@ -507,7 +507,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(result["indexed"], 2)
             self.assertLessEqual(len(serper.call_args.args[0]), 1)
 
-    def test_tavily_uses_ultra_fast_snippets_without_raw_content(self) -> None:
+    def test_tavily_uses_fast_snippets_without_raw_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             storage = Storage(root / "test.db")
@@ -520,9 +520,9 @@ class WebDiscoveryTest(unittest.TestCase):
 
             with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
                 discovery._fetch_tavily("liêm chính học thuật", 10)
-            self.assertEqual(captured["payload"]["search_depth"], "ultra-fast")
+            self.assertEqual(captured["payload"]["search_depth"], "fast")
             self.assertFalse(captured["payload"]["include_raw_content"])
-            self.assertEqual(captured["timeout"], 7.0)
+            self.assertEqual(captured["timeout"], 45.0)
 
     def test_build_queries_selects_a_small_number_of_excerpts(self) -> None:
         text = (
@@ -806,10 +806,12 @@ class ApiTest(unittest.TestCase):
                 )
                 self.assertTrue(health["ok"])
                 self.assertEqual(health["searchBackend"], "sqlite-fts5")
-                self.assertEqual(health["webDiscoveryLimits"]["mode"], "ultra-fast")
-                self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 8.0)
-                self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 4)
-                self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 2)
+                self.assertEqual(health["webDiscoveryLimits"]["queries"], 10)
+                self.assertEqual(health["webDiscoveryLimits"]["parallelWorkers"], 10)
+                self.assertEqual(health["webDiscoveryLimits"]["mode"], "fast")
+                self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 150.0)
+                self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 8)
+                self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMode"], "instant")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")

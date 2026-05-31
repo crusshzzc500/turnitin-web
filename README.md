@@ -31,7 +31,7 @@ Cách chạy thủ công:
 - Xuất báo cáo PDF có thông tin tổ chức, điểm tương đồng, nguồn, đoạn đối chiếu và cảnh báo liêm chính.
 - PDF scan ít chữ tự thử OCR khi máy chủ có Tesseract và `pdf2image`.
 - Quét bổ sung nguồn web công khai qua Tavily, Exa, Serper hoặc Brave khi người dùng chủ động bật; Tavily dùng
-  `ultra-fast`, Exa `instant` và Serper chỉ chạy fallback khi các tầng trước thiếu nguồn, và mỗi nhà cung cấp dừng chờ
+  `fast`, Exa `instant` và Serper chỉ chạy fallback khi các tầng trước thiếu nguồn, và mỗi nhà cung cấp dừng chờ
   nguồn chậm sau ngân sách thời gian cấu hình.
 - Chuẩn hóa Unicode cho văn bản đầu vào có lỗi mã hóa có thể phục hồi; nội dung báo cáo hiển thị bằng
   Times New Roman.
@@ -63,8 +63,8 @@ Danh sách API hiện có nằm trong [API.md](./API.md).
 ## Tìm thêm nguồn web khi tạo báo cáo
 
 Tùy chọn **Quét thêm nguồn web công khai** mặc định tắt. Khi người dùng chủ động bật, hệ thống
-chọn tối đa `6` đoạn trích nổi bật và gửi truy vấn song song sang Tavily. Khi Tavily trả về ít hơn
-`4` nguồn hữu ích hoặc không dùng được, Exa fallback chỉ nhận tối đa `2` truy vấn để tiết kiệm quota.
+chọn tối đa `10` đoạn trích nổi bật và gửi truy vấn song song sang Tavily. Khi Tavily trả về ít hơn
+`8` nguồn hữu ích hoặc không dùng được, Exa fallback chỉ nhận tối đa `3` truy vấn để tiết kiệm quota.
 Nếu tổng nguồn vẫn thiếu, Serper fallback chỉ nhận tối đa `1` truy vấn. Brave là lựa chọn dự phòng tiếp theo
 khi không có Tavily, Exa hoặc Serper. Mỗi truy vấn
 nhận tối đa `10` kết quả ứng viên, sau đó hệ thống lập chỉ mục nguồn phù hợp trong phạm vi tổ chức
@@ -80,8 +80,8 @@ $env:SERPER_API_KEY = '...'
 $env:BRAVE_SEARCH_API_KEY = '...'
 ```
 
-Tavily được ưu tiên nếu nhiều key cùng tồn tại. Mặc định Tavily dùng `ultra-fast`, không yêu cầu tải
-`raw_content`, và WebDiscovery trả kết quả hiện có sau tối đa `8` giây thay vì chờ một truy vấn chậm.
+Tavily được ưu tiên nếu nhiều key cùng tồn tại. Mặc định Tavily dùng `fast`, không yêu cầu tải
+`raw_content`, và WebDiscovery trả kết quả hiện có sau ngân sách chờ tối đa `150` giây.
 Exa fallback dùng `instant` và chỉ lấy `highlights`, không tải toàn văn trang.
 Serper fallback chỉ lấy các đoạn tóm tắt kết quả Google và bị khóa tối đa `1` truy vấn cho mỗi báo cáo.
 Có thể điều chỉnh giới hạn bằng

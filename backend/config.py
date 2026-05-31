@@ -30,15 +30,15 @@ class Settings:
     exa_api_key: str = ""
     serper_api_key: str = ""
     brave_search_api_key: str = ""
-    web_discovery_max_queries: int = 6
+    web_discovery_max_queries: int = 10
     web_discovery_max_results: int = 10
     web_discovery_max_content_chars: int = 250_000
-    web_discovery_parallel_workers: int = 6
-    web_discovery_mode: str = "ultra-fast"
-    web_discovery_time_budget_seconds: float = 8.0
-    web_discovery_request_timeout_seconds: float = 7.0
-    web_discovery_fallback_min_sources: int = 4
-    web_discovery_exa_max_queries: int = 2
+    web_discovery_parallel_workers: int = 10
+    web_discovery_mode: str = "fast"
+    web_discovery_time_budget_seconds: float = 150.0
+    web_discovery_request_timeout_seconds: float = 45.0
+    web_discovery_fallback_min_sources: int = 8
+    web_discovery_exa_max_queries: int = 3
     web_discovery_exa_mode: str = "instant"
     web_discovery_serper_max_queries: int = 1
     analysis_job_workers: int = 4
@@ -81,7 +81,7 @@ class Settings:
             exa_api_key=os.getenv("EXA_API_KEY", "").strip(),
             serper_api_key=os.getenv("SERPER_API_KEY", "").strip(),
             brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY", "").strip(),
-            web_discovery_max_queries=max(1, min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES", "6")))),
+            web_discovery_max_queries=max(1, min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES", "10")))),
             web_discovery_max_results=max(1, min(20, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS", "10")))),
             web_discovery_max_content_chars=max(
                 10_000,
@@ -89,28 +89,28 @@ class Settings:
             ),
             web_discovery_parallel_workers=max(
                 1,
-                min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS", "6"))),
+                min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS", "10"))),
             ),
             web_discovery_mode=(
-                os.getenv("MINH_CHUNG_WEB_DISCOVERY_MODE", "ultra-fast")
-                if os.getenv("MINH_CHUNG_WEB_DISCOVERY_MODE", "ultra-fast") in {"basic", "advanced", "fast", "ultra-fast"}
-                else "ultra-fast"
+                os.getenv("MINH_CHUNG_WEB_DISCOVERY_MODE", "fast")
+                if os.getenv("MINH_CHUNG_WEB_DISCOVERY_MODE", "fast") in {"basic", "advanced", "fast", "ultra-fast"}
+                else "fast"
             ),
             web_discovery_time_budget_seconds=max(
                 1.0,
-                min(30.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS", "8"))),
+                min(180.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS", "150"))),
             ),
             web_discovery_request_timeout_seconds=max(
                 1.0,
-                min(20.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS", "7"))),
+                min(60.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS", "45"))),
             ),
             web_discovery_fallback_min_sources=max(
                 1,
-                min(20, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_FALLBACK_MIN_SOURCES", "4"))),
+                min(20, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_FALLBACK_MIN_SOURCES", "8"))),
             ),
             web_discovery_exa_max_queries=max(
                 1,
-                min(3, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_EXA_MAX_QUERIES", "2"))),
+                min(3, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_EXA_MAX_QUERIES", "3"))),
             ),
             web_discovery_exa_mode=(
                 os.getenv("MINH_CHUNG_WEB_DISCOVERY_EXA_MODE", "instant")
