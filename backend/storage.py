@@ -334,22 +334,26 @@ class Storage:
                 metadata_json=metadata_json,
                 fetched_at=now,
             )
-            for position, chunk in enumerate(chunk_document(text_content)):
-                connection.execute(
+            chunk_rows = [
+                (
+                    source_id,
+                    position,
+                    chunk,
+                    normalize_text(chunk),
+                    fold_text(chunk),
+                    count_words(chunk),
+                )
+                for position, chunk in enumerate(chunk_document(text_content))
+            ]
+            if chunk_rows:
+                connection.executemany(
                     """
                     INSERT INTO chunks (
                         source_id, position, text_content, normalized_text, folded_text, token_count
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        source_id,
-                        position,
-                        chunk,
-                        normalize_text(chunk),
-                        fold_text(chunk),
-                        count_words(chunk),
-                    ),
+                    chunk_rows,
                 )
         if self.search_mirror:
             self.search_mirror.replace_source(source_id, self.get_source_search_documents(source_id))
@@ -1130,6 +1134,12 @@ class PostgresConnection:
             row = cursor.fetchone()
             lastrowid = int(row["id"]) if row else None
         return PostgresCursor(cursor, lastrowid=lastrowid)
+
+    def executemany(self, sql: str, params: list[tuple[Any, ...]]) -> PostgresCursor:
+        statement = sql.strip().rstrip(";").replace("?", "%s")
+        cursor = self.connection.cursor()
+        cursor.executemany(statement, params)
+        return PostgresCursor(cursor)
 
 
 class PostgresStorage(Storage):

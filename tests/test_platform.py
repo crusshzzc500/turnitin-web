@@ -30,7 +30,7 @@ from backend.extractors import extract_document
 from backend.jobs import AnalysisJobManager
 from backend.search import OpenSearchBackend
 from backend.server import create_server
-from backend.storage import PostgresStorage, Storage, utc_now
+from backend.storage import PostgresConnection, PostgresStorage, Storage, utc_now
 from backend.text import normalize_display_text, similarity
 from backend.web_discovery import (
     DiscoveryResult,
@@ -255,8 +255,37 @@ class PostgresStorageTest(unittest.TestCase):
         connection.close.assert_called_once()
         self.assertEqual(storage._connection_pool_created, 0)
 
+    def test_postgres_connection_batches_chunk_inserts(self) -> None:
+        connection = Mock()
+        cursor = connection.cursor.return_value
+        wrapper = PostgresConnection(connection)
+        wrapper.executemany("INSERT INTO chunks(source_id, position) VALUES (?, ?)", [(1, 0), (1, 1)])
+        cursor.executemany.assert_called_once_with(
+            "INSERT INTO chunks(source_id, position) VALUES (%s, %s)",
+            [(1, 0), (1, 1)],
+        )
+
 
 class SimilarityAnalyzerTest(unittest.TestCase):
+    def test_prefetches_document_candidates_before_matching_segments(self) -> None:
+        backend = Mock()
+        text = (
+            "Minh bạch dữ liệu giúp người học kiểm tra nguồn tài liệu một cách rõ ràng. "
+            "Quy trình đối chiếu cần ghi nhận đúng nội dung đã xuất hiện trên trang nguồn."
+        )
+        backend.search_chunks.return_value = [
+            {
+                "source_id": 1,
+                "title": "Nguồn công khai",
+                "url": "https://example.org/source",
+                "source_type": "website",
+                "text_content": text,
+            }
+        ]
+        report = SimilarityAnalyzer(backend).analyze(text)
+        self.assertEqual(report["percent"], 100)
+        backend.search_chunks.assert_called_once_with(text, limit=500, organization_id=None)
+
     def test_finds_matching_source_and_integrity_flag(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             storage = Storage(Path(directory) / "test.db")

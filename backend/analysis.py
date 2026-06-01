@@ -34,6 +34,16 @@ class SimilarityAnalyzer:
         matched_sources: dict[int, dict[str, Any]] = {}
         matched_words = 0
         match_number = 0
+        document_candidates = self.search_backend.search_chunks(text, limit=500, organization_id=organization_id)
+
+        def score_candidates(segment: str, candidates: list[dict[str, Any]]) -> list[tuple[float, dict[str, Any]]]:
+            scored = []
+            for candidate in candidates:
+                score = similarity(segment, candidate["text_content"])
+                if score >= threshold:
+                    scored.append((score, candidate))
+            scored.sort(key=lambda item: item[0], reverse=True)
+            return scored
 
         for raw_segment in split_sentences(text):
             words = count_words(raw_segment)
@@ -67,13 +77,12 @@ class SimilarityAnalyzer:
                 segments.append({"text": raw_segment, "kind": "plain", "words": words})
                 continue
 
-            candidates = self.search_backend.search_chunks(raw_segment, organization_id=organization_id)
-            scored = []
-            for candidate in candidates:
-                score = similarity(raw_segment, candidate["text_content"])
-                if score >= threshold:
-                    scored.append((score, candidate))
-            scored.sort(key=lambda item: item[0], reverse=True)
+            scored = score_candidates(raw_segment, document_candidates)
+            if not scored:
+                scored = score_candidates(
+                    raw_segment,
+                    self.search_backend.search_chunks(raw_segment, organization_id=organization_id),
+                )
 
             if not scored:
                 segments.append({"text": raw_segment, "kind": "plain", "words": words})
