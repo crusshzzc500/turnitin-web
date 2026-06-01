@@ -593,7 +593,7 @@ class WebDiscoveryTest(unittest.TestCase):
             root = Path(directory)
             storage = Storage(root / "test.db")
             discovery = WebDiscovery(
-                settings_for(root, tavily_api_key="tavily", exa_api_key="exa", serper_api_key="serper"),
+                settings_for(root, tavily_api_key="tavily", exa_api_key="exa"),
                 storage,
             )
             text = "Nội dung đủ dài để tạo truy vấn kiểm tra và xác minh bộ điều phối không gọi Exa khi Tavily đã đủ nguồn."
@@ -605,14 +605,12 @@ class WebDiscoveryTest(unittest.TestCase):
             with (
                 patch.object(discovery, "_tavily", return_value=primary),
                 patch.object(discovery, "_exa") as exa,
-                patch.object(discovery, "_serper") as serper,
             ):
                 result = discovery.discover_and_index(text, organization_id=1)
             self.assertEqual(result["provider"], "tavily")
             exa.assert_not_called()
-            serper.assert_not_called()
 
-    def test_serper_fallback_runs_after_tavily_and_exa_still_have_too_few_sources(self) -> None:
+    def test_serper_precision_runs_before_tavily_and_exa(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             storage = Storage(root / "test.db")
@@ -642,13 +640,15 @@ class WebDiscoveryTest(unittest.TestCase):
                 "Serper added one source.",
                 [{"id": 10, "title": "Serper source", "url": "https://example.org/serper"}],
             )
+            calls: list[str] = []
             with (
-                patch.object(discovery, "_tavily", return_value=tavily),
-                patch.object(discovery, "_exa", return_value=exa),
-                patch.object(discovery, "_serper", return_value=serper_result) as serper,
+                patch.object(discovery, "_tavily", side_effect=lambda *args: (calls.append("tavily"), tavily)[1]),
+                patch.object(discovery, "_exa", side_effect=lambda *args, **kwargs: (calls.append("exa"), exa)[1]),
+                patch.object(discovery, "_serper", side_effect=lambda *args, **kwargs: (calls.append("serper"), serper_result)[1]) as serper,
             ):
                 result = discovery.discover_and_index(text, organization_id=1)
-            self.assertEqual(result["provider"], "tavily+exa+serper")
+            self.assertEqual(calls, ["serper", "tavily", "exa"])
+            self.assertEqual(result["provider"], "serper+tavily+exa")
             self.assertEqual(result["indexed"], 2)
             self.assertLessEqual(len(serper.call_args.args[0]), 1)
 
@@ -690,8 +690,8 @@ class WebDiscoveryTest(unittest.TestCase):
                 patch.object(discovery, "_serper", side_effect=lambda *args, **kwargs: (calls.append("serper"), result("serper", "https://example.org/serper"))[1]) as serper,
             ):
                 result_payload = discovery.discover_and_index(text, organization_id=1)
-            self.assertEqual(calls, ["tavily", "exa", "websearchapi", "linkup", "serper"])
-            self.assertEqual(result_payload["provider"], "tavily+exa+websearchapi+linkup+serper")
+            self.assertEqual(calls, ["serper", "tavily", "exa", "websearchapi", "linkup"])
+            self.assertEqual(result_payload["provider"], "serper+tavily+exa+websearchapi+linkup")
             self.assertLessEqual(len(websearch.call_args.args[0]), 1)
             self.assertLessEqual(len(linkup.call_args.args[0]), 1)
             self.assertLessEqual(len(serper.call_args.args[0]), 1)

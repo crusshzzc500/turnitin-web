@@ -229,8 +229,25 @@ class WebDiscovery:
         result_limit = max_results or self.settings.web_discovery_max_results
         result_limit = max(1, min(20, int(result_limit)))
         result: DiscoveryResult | None = None
-        if self.settings.tavily_api_key:
-            result = self._tavily(queries, organization_id, result_limit, progress_callback)
+        if self.settings.serper_api_key and self._time_available():
+            result = self._serper(
+                queries[: self.settings.web_discovery_serper_max_queries],
+                organization_id,
+                min(3, result_limit),
+                progress_callback,
+            )
+        if (
+            self.settings.tavily_api_key
+            and (result is None or self._time_available())
+            and self._remaining_result_limit(result_limit, result) > 0
+        ):
+            primary = self._tavily(
+                queries,
+                organization_id,
+                self._remaining_result_limit(result_limit, result),
+                progress_callback,
+            )
+            result = primary if result is None else self._merge_results(result, primary)
         if (
             self.settings.exa_api_key
             and self._time_available()
@@ -267,20 +284,6 @@ class WebDiscovery:
         ):
             fallback = self._linkup(
                 queries[: self.settings.web_discovery_linkup_max_queries],
-                organization_id,
-                self._remaining_result_limit(result_limit, result),
-                progress_callback,
-                initial_seen_urls={source["url"] for source in result.sources} if result else None,
-            )
-            result = fallback if result is None else self._merge_results(result, fallback)
-        if (
-            self.settings.serper_api_key
-            and self._time_available()
-            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
-            and self._remaining_result_limit(result_limit, result) > 0
-        ):
-            fallback = self._serper(
-                queries[: self.settings.web_discovery_serper_max_queries],
                 organization_id,
                 self._remaining_result_limit(result_limit, result),
                 progress_callback,
