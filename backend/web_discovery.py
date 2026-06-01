@@ -86,6 +86,26 @@ def _exact_phrase_query(value: str, *, maximum_words: int = 18) -> str:
     return f'"{" ".join(words)}"' if words else ""
 
 
+def _focused_content_window(value: str, anchors: list[str], *, maximum_chars: int = 12_000) -> str:
+    if len(value) <= maximum_chars:
+        return value
+    folded_value = value.casefold()
+    for anchor in anchors:
+        words = re.findall(r"\w+", anchor, flags=re.UNICODE)
+        if not words:
+            continue
+        for size in (min(18, len(words)), min(10, len(words))):
+            phrase = " ".join(words[:size])
+            index = folded_value.find(phrase.casefold())
+            if index < 0:
+                continue
+            start = max(0, index - (maximum_chars // 3))
+            end = min(len(value), start + maximum_chars)
+            start = max(0, end - maximum_chars)
+            return value[start:end]
+    return value[:maximum_chars]
+
+
 def build_queries(text: str, *, max_queries: int = 3) -> list[str]:
     document_tokens = _informative_tokens(text)
     frequencies = Counter(document_tokens)
@@ -782,7 +802,7 @@ class WebDiscovery:
         relevance = candidate_relevance(query, title, content)
         if relevance < 0.18:
             return None
-        content, enriched = self._enrich_content(canonical_url, content, relevance=relevance)
+        content, enriched = self._enrich_content(canonical_url, content, relevance=relevance, query=query)
         relevance = candidate_relevance(query, title, content)
         seen_urls.add(canonical_url)
         namespace = str(organization_id) if organization_id is not None else "public"
@@ -809,7 +829,14 @@ class WebDiscovery:
             "relevanceScore": round(relevance, 3),
         }
 
-    def _enrich_content(self, canonical_url: str, content: str, *, relevance: float = 1.0) -> tuple[str, bool]:
+    def _enrich_content(
+        self,
+        canonical_url: str,
+        content: str,
+        *,
+        relevance: float = 1.0,
+        query: str = "",
+    ) -> tuple[str, bool]:
         if relevance < 0.72 or not self.crawler or count_words(content) >= 140 or not self._time_available(4.0):
             return content, False
         with self._enrichment_lock:
@@ -818,7 +845,7 @@ class WebDiscovery:
             self._enrichment_remaining -= 1
         executor = ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(self._fetch_enriched_content, canonical_url)
+            future = executor.submit(self._fetch_enriched_content, canonical_url, [query, content])
             enriched = future.result(timeout=min(3.0, max(0.5, self._time_remaining() - 1.0)))
             if count_words(enriched) > count_words(content):
                 return enriched, True
@@ -828,13 +855,18 @@ class WebDiscovery:
             executor.shutdown(wait=False, cancel_futures=True)
         return content, False
 
-    def _fetch_enriched_content(self, canonical_url: str) -> str:
+    def _fetch_enriched_content(self, canonical_url: str, anchors: list[str] | None = None) -> str:
         try:
             normalized = self.crawler.url_policy.validate(canonical_url)
             if not self.crawler.robots.allowed(normalized):
                 return ""
             result = self.crawler._fetch(normalized)
-            return normalize_display_text(result.text).strip()[: self.settings.web_discovery_max_content_chars]
+            text = normalize_display_text(result.text).strip()
+            return _focused_content_window(
+                text,
+                anchors or [],
+                maximum_chars=min(12_000, self.settings.web_discovery_max_content_chars),
+            )
         except Exception:
             return ""
 

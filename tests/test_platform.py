@@ -35,6 +35,7 @@ from backend.text import normalize_display_text, similarity
 from backend.web_discovery import (
     DiscoveryResult,
     WebDiscovery,
+    _focused_content_window,
     build_queries,
     candidate_relevance,
     normalize_candidate_url,
@@ -768,6 +769,13 @@ class WebDiscoveryTest(unittest.TestCase):
         )
         self.assertGreater(relevant, 0.8)
         self.assertEqual(unrelated, 0.0)
+
+    def test_focused_content_window_keeps_anchor_without_indexing_entire_page(self) -> None:
+        anchor = "lòng yêu nước là một phẩm chất quý báu"
+        page = f"{'phần giới thiệu ' * 120}{anchor}. {'phần kết luận ' * 120}"
+        focused = _focused_content_window(page, [anchor], maximum_chars=500)
+        self.assertLessEqual(len(focused), 500)
+        self.assertIn(anchor, focused)
 
     def test_tracking_urls_are_normalized_before_indexing(self) -> None:
         self.assertEqual(
