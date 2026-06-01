@@ -190,6 +190,7 @@ def settings_for(
     websearchapi_api_key: str = "",
     linkup_api_key: str = "",
     serper_api_key: str = "",
+    openai_api_key: str = "",
     public_mode: bool = False,
     auth_mode: str = "demo",
 ) -> Settings:
@@ -209,6 +210,7 @@ def settings_for(
         websearchapi_api_key=websearchapi_api_key,
         linkup_api_key=linkup_api_key,
         serper_api_key=serper_api_key,
+        openai_api_key=openai_api_key,
         public_mode=public_mode,
         auth_mode=auth_mode,
     )
@@ -517,6 +519,52 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_openai_expands_queries_with_structured_output_and_keeps_exact_query(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, openai_api_key="openai-test-key"), storage)
+            discovery._active_deadline = time.monotonic() + 10
+            captured: dict = {}
+            initial = [f'"exact phrase {index}"' for index in range(10)]
+
+            def fake_request(url, payload, *, headers, timeout):
+                captured.update({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+                return {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": json.dumps(
+                                        {"queries": ["semantic paraphrase search", "translated original phrase"]}
+                                    ),
+                                }
+                            ]
+                        }
+                    ]
+                }
+
+            with patch.object(discovery, "_json_request", side_effect=fake_request):
+                expanded = discovery._expand_queries_with_openai("Submitted document text", initial)
+            self.assertEqual(captured["url"], "https://api.openai.com/v1/responses")
+            self.assertEqual(captured["payload"]["model"], "gpt-5-nano")
+            self.assertEqual(captured["payload"]["text"]["format"]["type"], "json_schema")
+            self.assertEqual(captured["headers"]["Authorization"], "Bearer openai-test-key")
+            self.assertEqual(expanded[0], initial[0])
+            self.assertIn("semantic paraphrase search", expanded)
+            self.assertLessEqual(len(expanded), 10)
+
+    def test_openai_query_expansion_failure_keeps_existing_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, openai_api_key="openai-test-key"), storage)
+            discovery._active_deadline = time.monotonic() + 10
+            initial = ['"exact copied phrase"', "keyword signature"]
+            with patch.object(discovery, "_json_request", side_effect=TimeoutError):
+                self.assertEqual(discovery._expand_queries_with_openai("Submitted document text", initial), initial)
+
     def test_websearchapi_uses_basic_search_without_content_with_server_side_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1456,6 +1504,9 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["linkupDepth"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
                 self.assertEqual(health["webDiscoveryLimits"]["enrichmentMaxSources"], 2)
+                self.assertEqual(health["webDiscoveryLimits"]["openaiModel"], "gpt-5-nano")
+                self.assertEqual(health["webDiscoveryLimits"]["openaiExpansionMaxQueries"], 3)
+                self.assertEqual(health["webDiscoveryLimits"]["openaiTimeoutSeconds"], 4.0)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)
                 self.assertEqual(stats["sources"], 4)

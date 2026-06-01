@@ -232,6 +232,7 @@ class WebDiscovery:
             "linkup": bool(self.settings.linkup_api_key),
             "serper": bool(self.settings.serper_api_key),
             "brave": bool(self.settings.brave_search_api_key),
+            "openaiQueryExpansion": bool(self.settings.openai_api_key),
         }
 
     def discover_and_index(
@@ -264,6 +265,7 @@ class WebDiscovery:
             )
         if self._has_exact_document_match(result):
             return result.to_dict()
+        queries = self._expand_queries_with_openai(text, queries)
         if (
             self.settings.tavily_api_key
             and (result is None or self._time_available())
@@ -342,6 +344,78 @@ class WebDiscovery:
     @staticmethod
     def _remaining_result_limit(result_limit: int, result: DiscoveryResult | None) -> int:
         return max(0, min(10, result_limit - (result.indexed if result else 0)))
+
+    def _expand_queries_with_openai(self, text: str, queries: list[str]) -> list[str]:
+        maximum = self.settings.openai_query_expansion_max_queries
+        if (
+            not self.settings.openai_api_key
+            or maximum <= 0
+            or not self._time_available(self.settings.openai_timeout_seconds + 0.5)
+        ):
+            return queries
+        payload = {
+            "model": self.settings.openai_model,
+            "store": False,
+            "instructions": (
+                "Create precise public-web search queries for plagiarism source discovery. "
+                "Return only phrases likely to locate the original source or close paraphrases. "
+                "Do not assess plagiarism, invent sources, or include explanations."
+            ),
+            "input": text[:12_000],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "plagiarism_search_queries",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "queries": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "maxItems": maximum,
+                            }
+                        },
+                        "required": ["queries"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "max_output_tokens": 240,
+        }
+        try:
+            response = self._json_request(
+                "https://api.openai.com/v1/responses",
+                payload,
+                headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
+                timeout=min(self.settings.openai_timeout_seconds, self._request_timeout()),
+            )
+            expanded = json.loads(self._response_output_text(response)).get("queries", [])
+        except Exception:
+            return queries
+        if not isinstance(expanded, list):
+            return queries
+        base_limit = max(1, self.settings.web_discovery_max_queries - maximum)
+        merged = list(queries[:base_limit])
+        seen = {query.casefold() for query in merged}
+        for query in expanded:
+            clean = re.sub(r"\s+", " ", str(query)).strip(" \t\n\r\"'")
+            if 5 <= len(clean) <= 240 and clean.casefold() not in seen:
+                merged.append(clean)
+                seen.add(clean.casefold())
+            if len(merged) >= self.settings.web_discovery_max_queries:
+                break
+        return merged if len(merged) > min(len(queries), base_limit) else queries
+
+    @staticmethod
+    def _response_output_text(response: dict[str, Any]) -> str:
+        if isinstance(response.get("output_text"), str):
+            return str(response["output_text"])
+        for item in response.get("output") or []:
+            for content in item.get("content") or []:
+                if content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                    return str(content["text"])
+        return "{}"
 
     @staticmethod
     def _has_exact_document_match(result: DiscoveryResult | None) -> bool:

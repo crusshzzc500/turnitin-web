@@ -46,3 +46,9 @@ không dùng file SQLite trên Render; dữ liệu cần giữ lại được gh
 
 Không đặt `MINH_CHUNG_PUBLIC_MODE=1` cho bản cần lưu lịch sử. Bản local không có `DATABASE_URL`
 vẫn dùng SQLite và header giả lập vai trò để phát triển, còn Render dùng Neon và đăng nhập mật khẩu.
+
+## Optional OpenAI query expansion
+
+Add `OPENAI_API_KEY` in Render Environment to enable server-side AI query expansion. Keep the key secret. `OPENAI_MODEL=gpt-5-nano`, `MINH_CHUNG_OPENAI_QUERY_EXPANSION_MAX_QUERIES=3`, and `MINH_CHUNG_OPENAI_TIMEOUT_SECONDS=4` are configured by the Blueprint.
+
+This option sends up to `12,000` characters of submitted text to OpenAI only when an exact source has not already been found. It generates additional search queries; similarity percentages still require evidence from indexed source URLs. OpenAI API usage is billed separately from a ChatGPT subscription.

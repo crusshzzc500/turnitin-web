@@ -181,6 +181,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "linkupDepth": self.context.settings.web_discovery_linkup_depth,
                         "serperMaxQueries": self.context.settings.web_discovery_serper_max_queries,
                         "enrichmentMaxSources": self.context.settings.web_discovery_enrichment_max_sources,
+                        "openaiModel": self.context.settings.openai_model,
+                        "openaiExpansionMaxQueries": self.context.settings.openai_query_expansion_max_queries,
+                        "openaiTimeoutSeconds": self.context.settings.openai_timeout_seconds,
                     },
                 }
             )

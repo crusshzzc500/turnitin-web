@@ -33,6 +33,10 @@ class Settings:
     linkup_api_key: str = ""
     serper_api_key: str = ""
     brave_search_api_key: str = ""
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5-nano"
+    openai_query_expansion_max_queries: int = 3
+    openai_timeout_seconds: float = 4.0
     web_discovery_max_queries: int = 10
     web_discovery_max_results: int = 10
     web_discovery_max_content_chars: int = 250_000
@@ -94,6 +98,16 @@ class Settings:
             linkup_api_key=os.getenv("LINKUP_API_KEY", "").strip(),
             serper_api_key=os.getenv("SERPER_API_KEY", "").strip(),
             brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY", "").strip(),
+            openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-5-nano").strip() or "gpt-5-nano",
+            openai_query_expansion_max_queries=max(
+                0,
+                min(4, int(os.getenv("MINH_CHUNG_OPENAI_QUERY_EXPANSION_MAX_QUERIES", "3"))),
+            ),
+            openai_timeout_seconds=max(
+                1.0,
+                min(6.0, float(os.getenv("MINH_CHUNG_OPENAI_TIMEOUT_SECONDS", "4"))),
+            ),
             web_discovery_max_queries=max(1, min(10, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES", "10")))),
             web_discovery_max_results=max(1, min(20, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS", "10")))),
             web_discovery_max_content_chars=max(
