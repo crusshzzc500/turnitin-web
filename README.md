@@ -144,16 +144,29 @@ kết luận tự động về đạo văn.
 
 ## Optional Gemini query expansion
 
-Set `GEMINI_API_KEY` on the server to let `gemini-3.5-flash` generate up to `3` additional public-web search queries when an exact source has not already been found. Gemini is tried first because it has a free API tier suitable for small projects. The model improves query coverage only: reported similarity still requires text evidence from indexed source URLs.
+Set `GEMINI_API_KEY` on the server to let `gemini-3-flash-preview` generate up to `3` additional public-web search queries when an exact source has not already been found. Gemini is tried first because it has a free API tier suitable for small projects. The model improves query coverage only: reported similarity still requires text evidence from indexed source URLs. A stale `GEMINI_MODEL=gemini-3.5-flash` value is automatically migrated to the official `gemini-3-flash-preview` model ID.
 
 When this option is enabled, the server may send up to `12,000` characters from the submitted text to Gemini. Free-tier Gemini API content may be used by Google to improve its products, so do not enable this option for confidential documents. Without `GEMINI_API_KEY`, no text is sent to Gemini and the existing web search flow continues unchanged. Keep the key in Render Environment variables only; do not commit it or include it in a ZIP file.
 
 Optional tuning variables:
 
 ```powershell
-$env:GEMINI_MODEL = 'gemini-3.5-flash'
+$env:GEMINI_MODEL = 'gemini-3-flash-preview'
 $env:MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES = '3'
 $env:MINH_CHUNG_GEMINI_TIMEOUT_SECONDS = '4'
+```
+
+## Citation-aware Gemini writing assistant
+
+When Gemini is configured, a report can open a citation-aware revision assistant. The user must explicitly enable public-web scanning before requesting a revision. The server scans the original draft, asks Gemini to improve clarity and add source markers, scans the proposed revision again, and returns both similarity percentages for review.
+
+The assistant is intentionally not a plagiarism-evasion or AI-detector-evasion tool. It does not claim that generated writing is human-authored or original. It preserves quotations, adds `[Nguồn n]` markers for verified sources, and uses `[Cần trích dẫn nguồn]` when attribution still needs manual work. Turnitin is not called unless a future deployment receives an official licensed API integration.
+
+Optional tuning variables:
+
+```powershell
+$env:MINH_CHUNG_GEMINI_REVISION_TIMEOUT_SECONDS = '45'
+$env:MINH_CHUNG_GEMINI_REVISION_MAX_INPUT_CHARS = '30000'
 ```
 
 ## Optional OpenAI fallback

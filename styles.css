@@ -910,6 +910,107 @@ input[type="url"]:focus {
   margin: 0;
 }
 
+.writing-assistant-card {
+  margin-top: 13px;
+  padding: 17px;
+  border: 1px solid #d5e6df;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f7fbf8, #fffdfa);
+  box-shadow: var(--shadow);
+}
+
+.writing-assistant-heading,
+.revision-score-grid,
+.revision-notes {
+  display: grid;
+  gap: 13px;
+}
+
+.writing-assistant-heading {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.writing-assistant-heading h2 {
+  margin-top: 3px;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.writing-assistant-description,
+.writing-assistant-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.writing-assistant-result {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.revision-score-grid,
+.revision-notes {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.revision-score-grid article {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.revision-score-grid span,
+.revision-score-grid strong {
+  display: block;
+}
+
+.revision-score-grid span,
+.revision-notes,
+.writing-assistant-result label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.revision-score-grid strong {
+  margin-top: 4px;
+  color: var(--forest);
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 27px;
+}
+
+.writing-assistant-result label {
+  display: block;
+  margin-top: 14px;
+  font-weight: 800;
+}
+
+.writing-assistant-result textarea {
+  width: 100%;
+  margin-top: 7px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.revision-notes {
+  margin: 13px 0;
+}
+
+.revision-notes ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
 .score-card {
   display: flex;
   align-items: center;
@@ -1691,7 +1792,10 @@ input[type="url"]:focus {
 
   .action-row,
   .document-heading,
-  .report-sidebar {
+  .report-sidebar,
+  .writing-assistant-heading,
+  .revision-score-grid,
+  .revision-notes {
     display: grid;
     grid-template-columns: 1fr;
   }

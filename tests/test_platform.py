@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from backend.analysis import SimilarityAnalyzer
-from backend.config import Settings
+from backend.config import Settings, normalize_gemini_model
 from backend.crawler import Crawler
 from backend.demo_data import seed_demo_sources
 from backend.extractors import extract_document
@@ -41,6 +41,7 @@ from backend.web_discovery import (
     candidate_relevance,
     normalize_candidate_url,
 )
+from backend.writing_assistant import CitationWritingAssistant
 
 
 class LocalSiteHandler(BaseHTTPRequestHandler):
@@ -457,6 +458,13 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(settings.web_discovery_request_timeout_seconds, 8.0)
             self.assertEqual(settings.web_discovery_enrichment_max_sources, 2)
 
+    def test_stale_gemini_model_alias_migrates_to_official_free_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.5-flash"}, clear=True):
+                settings = Settings.from_env(Path(directory))
+            self.assertEqual(normalize_gemini_model("gemini-3.5-flash"), "gemini-3-flash-preview")
+            self.assertEqual(settings.gemini_model, "gemini-3-flash-preview")
+
 
 class SearchBackendTest(unittest.TestCase):
     def test_opensearch_adapter_indexes_deletes_searches_and_reports_status(self) -> None:
@@ -552,9 +560,10 @@ class WebDiscoveryTest(unittest.TestCase):
                 expanded = discovery._expand_queries_with_gemini("Submitted document text", initial)
             self.assertEqual(
                 captured["url"],
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
             )
             self.assertEqual(captured["payload"]["generationConfig"]["responseMimeType"], "application/json")
+            self.assertEqual(captured["payload"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "minimal")
             self.assertEqual(
                 captured["payload"]["generationConfig"]["responseJsonSchema"]["properties"]["queries"]["maxItems"],
                 3,
@@ -1393,6 +1402,72 @@ class WebDiscoveryTest(unittest.TestCase):
             exa.assert_not_called()
 
 
+class CitationWritingAssistantTest(unittest.TestCase):
+    def test_revision_uses_official_gemini_model_structured_output_and_citation_guardrails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assistant = CitationWritingAssistant(settings_for(root, gemini_api_key="gemini-test-key"))
+            captured: dict = {}
+            text = (
+                "Liêm chính học thuật là nền tảng quan trọng của giáo dục đáng tin cậy và cần được "
+                "thực hành bằng cách ghi nhận nguồn tham khảo rõ ràng trong từng bài viết của người học."
+            )
+            report = {
+                "sources": [{"id": 1, "title": "Sổ tay học thuật", "url": "https://example.org/source"}],
+                "matchedSegments": [
+                    {
+                        "text": "Liêm chính học thuật là nền tảng quan trọng của giáo dục đáng tin cậy.",
+                        "source": {"id": 1},
+                    }
+                ],
+            }
+
+            def fake_request(url, payload, *, headers, timeout):
+                captured.update({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            {
+                                                "revision": (
+                                                    "Liêm chính học thuật góp phần xây dựng môi trường giáo dục đáng "
+                                                    "tin cậy [Nguồn 1]. Người học cần ghi nhận rõ tài liệu tham khảo "
+                                                    "trong quá trình hoàn thiện từng bài viết của mình."
+                                                ),
+                                                "editorNotes": ["Đã bổ sung vị trí dẫn nguồn."],
+                                                "citationNotes": [
+                                                    {
+                                                        "marker": "[Nguồn 1]",
+                                                        "sourceTitle": "Sổ tay học thuật",
+                                                        "sourceUrl": "https://example.org/source",
+                                                        "reason": "Ý tưởng được kế thừa từ nguồn đối chiếu.",
+                                                    }
+                                                ],
+                                            }
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+
+            with patch.object(assistant, "_json_request", side_effect=fake_request):
+                result = assistant.revise(text, report)
+            self.assertEqual(
+                captured["url"],
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
+            )
+            self.assertEqual(captured["headers"]["x-goog-api-key"], "gemini-test-key")
+            self.assertEqual(captured["payload"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "high")
+            self.assertIn("Do not help evade plagiarism detection", captured["payload"]["contents"][0]["parts"][0]["text"])
+            self.assertIn("[Nguồn 1]", result["revision"])
+            self.assertEqual(result["mode"], "citation-guided-revision")
+
+
 class TextDisplayTest(unittest.TestCase):
     def test_repairs_reversible_utf8_mojibake_and_preserves_valid_vietnamese(self) -> None:
         self.assertEqual(normalize_display_text("LiÃªm chÃ­nh há»c thuáº­t"), "Liêm chính học thuật")
@@ -1585,9 +1660,13 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["linkupDepth"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
                 self.assertEqual(health["webDiscoveryLimits"]["enrichmentMaxSources"], 2)
-                self.assertEqual(health["webDiscoveryLimits"]["geminiModel"], "gemini-3.5-flash")
+                self.assertEqual(health["webDiscoveryLimits"]["geminiModel"], "gemini-3-flash-preview")
                 self.assertEqual(health["webDiscoveryLimits"]["geminiExpansionMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["geminiTimeoutSeconds"], 4.0)
+                self.assertEqual(health["webDiscoveryLimits"]["geminiRevisionTimeoutSeconds"], 45.0)
+                self.assertEqual(health["webDiscoveryLimits"]["geminiRevisionMaxInputChars"], 30000)
+                self.assertFalse(health["writingAssistant"]["enabled"])
+                self.assertEqual(health["writingAssistant"]["mode"], "citation-guided-revision")
                 self.assertEqual(health["webDiscoveryLimits"]["openaiModel"], "gpt-5-nano")
                 self.assertEqual(health["webDiscoveryLimits"]["openaiExpansionMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["openaiTimeoutSeconds"], 4.0)
@@ -1596,6 +1675,64 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(stats["sources"], 4)
                 self.assertGreater(report["percent"], 70)
                 self.assertTrue(report["reportId"])
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_citation_revision_job_scans_original_and_proposal_before_returning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_server(settings_for(Path(directory), port=0, gemini_api_key="gemini-test-key"))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                text = (
+                    "Liêm chính học thuật là nền tảng của một môi trường giáo dục đáng tin cậy. "
+                    "Người học cần phân biệt rõ việc tham khảo ý tưởng, trích dẫn trực tiếp và sao "
+                    "chép nội dung mà không ghi nhận nguồn."
+                )
+                revision = (
+                    "Trong môi trường giáo dục đáng tin cậy, người học cần ghi nhận rõ nguồn tham khảo "
+                    "và phân biệt nội dung trích dẫn trực tiếp với ý tưởng được kế thừa [Nguồn 1]."
+                )
+                web_result = {
+                    "provider": "tavily",
+                    "enabled": True,
+                    "externalProcessing": True,
+                    "queries": ["liêm chính học thuật"],
+                    "indexed": 1,
+                    "skipped": 0,
+                    "message": "Đã rà nguồn web công khai.",
+                    "sources": [],
+                }
+                proposal = {
+                    "revision": revision,
+                    "editorNotes": ["Đã thêm vị trí cần dẫn nguồn."],
+                    "citationNotes": [],
+                    "model": "gemini-3-flash-preview",
+                    "mode": "citation-guided-revision",
+                    "notice": "Đây là bản đề xuất.",
+                }
+                with (
+                    patch.object(server.context.web_discovery, "discover_and_index", return_value=web_result) as discover,  # type: ignore[attr-defined]
+                    patch.object(server.context.writing_assistant, "revise", return_value=proposal) as revise,  # type: ignore[attr-defined]
+                ):
+                    created = self._json(
+                        f"{base}/api/analysis-jobs",
+                        method="POST",
+                        payload={"kind": "citation-revision", "text": text, "enableWebSearch": True},
+                    )
+                    result = self._poll_job(base, created)["result"]
+                audit = self._json(f"{base}/api/audit")
+                self.assertEqual(discover.call_count, 2)
+                self.assertEqual(revise.call_count, 1)
+                self.assertEqual(result["revision"], revision)
+                self.assertTrue(result["externalWebVerification"])
+                self.assertIn("verificationReport", result)
+                self.assertIn(
+                    "writing_assistant.citation_revision",
+                    {event["action"] for event in audit["events"]},
+                )
             finally:
                 server.shutdown()
                 server.server_close()

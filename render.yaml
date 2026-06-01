@@ -47,11 +47,15 @@ services:
       - key: MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES
         value: "2"
       - key: GEMINI_MODEL
-        value: "gemini-3.5-flash"
+        value: "gemini-3-flash-preview"
       - key: MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES
         value: "3"
       - key: MINH_CHUNG_GEMINI_TIMEOUT_SECONDS
         value: "4"
+      - key: MINH_CHUNG_GEMINI_REVISION_TIMEOUT_SECONDS
+        value: "45"
+      - key: MINH_CHUNG_GEMINI_REVISION_MAX_INPUT_CHARS
+        value: "30000"
       - key: GEMINI_API_KEY
         sync: false
       - key: OPENAI_MODEL

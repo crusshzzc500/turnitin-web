@@ -37,6 +37,7 @@ from .search import SearchBackend, create_search_backend
 from .storage import Storage, create_storage
 from .text import count_words, normalize_display_text
 from .web_discovery import WebDiscovery
+from .writing_assistant import CitationWritingAssistant
 
 
 @dataclass
@@ -48,6 +49,7 @@ class AppContext:
     crawl_runner: CrawlRunner
     search_backend: SearchBackend
     web_discovery: WebDiscovery
+    writing_assistant: CitationWritingAssistant
     analysis_jobs: AnalysisJobManager
 
     @classmethod
@@ -68,6 +70,7 @@ class AppContext:
             crawl_runner=CrawlRunner(crawler),
             search_backend=search_backend,
             web_discovery=web_discovery,
+            writing_assistant=CitationWritingAssistant(settings),
             analysis_jobs=AnalysisJobManager(
                 max_workers=settings.analysis_job_workers,
                 ttl_seconds=settings.analysis_job_ttl_seconds,
@@ -163,6 +166,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                     "databaseBackend": self.context.storage.backend_name,
                     "searchBackend": self.context.search_backend.name,
                     "webDiscovery": self.context.web_discovery.status(),
+                    "writingAssistant": self.context.writing_assistant.status(),
                     "webDiscoveryStrategy": "adaptive-fingerprint-v2",
                     "publicMode": self.context.settings.public_mode,
                     "authRequired": self.context.settings.auth_mode == "password",
@@ -184,6 +188,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "geminiModel": self.context.settings.gemini_model,
                         "geminiExpansionMaxQueries": self.context.settings.gemini_query_expansion_max_queries,
                         "geminiTimeoutSeconds": self.context.settings.gemini_timeout_seconds,
+                        "geminiRevisionTimeoutSeconds": self.context.settings.gemini_revision_timeout_seconds,
+                        "geminiRevisionMaxInputChars": self.context.settings.gemini_revision_max_input_chars,
                         "openaiModel": self.context.settings.openai_model,
                         "openaiExpansionMaxQueries": self.context.settings.openai_query_expansion_max_queries,
                         "openaiTimeoutSeconds": self.context.settings.openai_timeout_seconds,
@@ -383,9 +389,81 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             work = lambda progress: self._build_text_analysis(payload, principal, progress)
         elif kind == "upload":
             work = lambda progress: self._build_upload_analysis(payload, principal, progress)
+        elif kind == "citation-revision":
+            work = lambda progress: self._build_citation_revision(payload, principal, progress)
         else:
             raise ValueError("Loại tiến trình phân tích không hợp lệ.")
         self._send_json(self.context.analysis_jobs.create(work), HTTPStatus.ACCEPTED)
+
+    def _build_citation_revision(
+        self,
+        payload: dict[str, Any],
+        principal: Principal,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        text = normalize_display_text(str(payload.get("text", ""))).strip()
+        if count_words(text) < 20:
+            raise ValueError("Tài liệu cần có ít nhất 20 từ.")
+        analysis_settings = payload.get("settings") or {}
+        analyzer_kwargs = {
+            "minimum_words": max(4, min(30, int(analysis_settings.get("minimumWords", 8)))),
+            "exclude_quotes": bool(analysis_settings.get("excludeQuotes", True)),
+            "exclude_bibliography": bool(analysis_settings.get("excludeBibliography", True)),
+            "organization_id": self._organization_scope(principal),
+        }
+        self._progress(progress, 8, "web_discovery", "Đang rà nguồn cho bản gốc.")
+        original_discovery = self._discover_web_sources(
+            payload,
+            text,
+            principal,
+            progress,
+            progress_start=10,
+            progress_range=18,
+            audit_phase="citation-revision-original",
+        )
+        original_report = self.context.analyzer.analyze(text, **analyzer_kwargs)
+        if original_discovery is not None:
+            original_report["webDiscovery"] = original_discovery
+        self._progress(progress, 38, "revising", "Gemini đang tạo bản đề xuất có dẫn nguồn.")
+        proposal = self.context.writing_assistant.revise(text, original_report)
+        revision = str(proposal["revision"])
+        self._progress(progress, 68, "verifying", "Đang tự rà lại bản đề xuất bằng kho nguồn và web công khai.")
+        verification_discovery = self._discover_web_sources(
+            payload,
+            revision,
+            principal,
+            progress,
+            progress_start=70,
+            progress_range=16,
+            audit_phase="citation-revision-verification",
+        )
+        verification_report = self.context.analyzer.analyze(revision, **analyzer_kwargs)
+        if verification_discovery is not None:
+            verification_report["webDiscovery"] = verification_discovery
+        result = {
+            **proposal,
+            "originalReport": self._report_summary(original_report),
+            "verificationReport": verification_report,
+            "externalWebVerification": verification_discovery is not None,
+            "checkerNotice": (
+                "Bản đề xuất đã được tự rà lại bằng hệ thống Minh Chứng. "
+                "Không có kết nối Turnitin vì ứng dụng chưa được cấp API chính thức từ Turnitin."
+            ),
+        }
+        self._add_public_retention_notice(result)
+        self._audit(
+            principal,
+            "writing_assistant.citation_revision",
+            "report",
+            details={
+                "model": proposal["model"],
+                "originalPercent": original_report["percent"],
+                "verificationPercent": verification_report["percent"],
+                "externalWebVerification": verification_discovery is not None,
+            },
+        )
+        self._progress(progress, 96, "finalizing", "Đã hoàn tất bản đề xuất và lượt tự rà lại.")
+        return result
 
     def _create_upload_analysis_job(self, principal: Principal) -> None:
         filename = unquote(self.headers.get("X-Minh-Chung-Filename", "document.docx"))
@@ -523,18 +601,27 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         text: str,
         principal: Principal,
         progress: ProgressCallback | None = None,
+        *,
+        progress_start: int = 22,
+        progress_range: int = 50,
+        audit_phase: str = "report",
     ) -> dict[str, Any] | None:
         if not bool(payload.get("enableWebSearch", False)):
-            self._progress(progress, 42, "web_discovery", "Bỏ qua quét web theo lựa chọn của bạn.")
+            self._progress(
+                progress,
+                progress_start + round(progress_range * 0.4),
+                "web_discovery",
+                "Bỏ qua quét web theo lựa chọn của bạn.",
+            )
             return None
-        self._progress(progress, 22, "web_discovery", "Đang quét song song các nguồn web công khai.")
+        self._progress(progress, progress_start, "web_discovery", "Đang quét song song các nguồn web công khai.")
         result = self.context.web_discovery.discover_and_index(
             text,
             organization_id=self._organization_scope(principal),
             max_results=max(1, min(20, int(payload.get("webSearchMaxResults", 10)))),
             progress_callback=lambda completed, total, indexed: self._progress(
                 progress,
-                22 + round((completed / max(1, total)) * 50),
+                progress_start + round((completed / max(1, total)) * progress_range),
                 "web_discovery",
                 f"Đã quét {completed}/{total} truy vấn web, tìm thấy {indexed} nguồn phù hợp.",
             ),
@@ -549,9 +636,21 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 "skipped": result["skipped"],
                 "queryCount": len(result["queries"]),
                 "externalProcessing": result["externalProcessing"],
+                "phase": audit_phase,
             },
         )
         return result
+
+    @staticmethod
+    def _report_summary(report: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "totalWords": report["totalWords"],
+            "matchedWords": report["matchedWords"],
+            "percent": report["percent"],
+            "matchedSegments": len(report["matchedSegments"]),
+            "sources": report["sources"],
+            "webDiscovery": report.get("webDiscovery"),
+        }
 
     @staticmethod
     def _progress(callback: ProgressCallback | None, value: int, phase: str, message: str) -> None:

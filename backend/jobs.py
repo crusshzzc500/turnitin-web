@@ -70,7 +70,7 @@ class AnalysisJobManager:
                     "status": "completed",
                     "progress": 100,
                     "phase": "completed",
-                    "message": "Đã hoàn tất báo cáo tương đồng.",
+                    "message": "Đã hoàn tất tiến trình.",
                     "updatedAt": utc_now(),
                     "result": result,
                 }

@@ -52,7 +52,7 @@ Ví dụ thêm nguồn:
 
 | Phương thức | Đường dẫn | Mục đích |
 | --- | --- | --- |
-| `POST` | `/api/analysis-jobs` | Tạo job phân tích văn bản nền và nhận token theo dõi. |
+| `POST` | `/api/analysis-jobs` | Tạo job phân tích văn bản hoặc trợ lý chỉnh sửa có dẫn nguồn và nhận token theo dõi. |
 | `POST` | `/api/analysis-jobs/upload` | Tải nguyên tệp nhị phân `.txt`, `.md`, `.docx`, `.pdf` để tạo job nền. |
 | `GET` | `/api/analysis-jobs/{id}` | Xem phần trăm tiến trình bằng header `X-Minh-Chung-Job-Token`. |
 | `POST` | `/api/analyze` | Phân tích văn bản JSON đồng bộ để tương thích client cũ. |
@@ -74,6 +74,20 @@ Ví dụ phân tích:
   }
 }
 ```
+
+Ví dụ tạo bản đề xuất có dẫn nguồn và tự rà lại:
+
+```json
+{
+  "kind": "citation-revision",
+  "text": "Nội dung bài viết...",
+  "enableWebSearch": true,
+  "webSearchMaxResults": 10
+}
+```
+
+Trợ lý yêu cầu `GEMINI_API_KEY`, quét bản gốc, tạo bản đề xuất có dẫn nguồn và quét lại bản đề xuất.
+Tính năng này không gọi Turnitin nếu chưa có tích hợp API chính thức được cấp phép.
 
 `indexForComparison` mặc định là `false`. Chỉ đặt thành `true` sau khi người nộp
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.

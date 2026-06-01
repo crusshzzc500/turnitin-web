@@ -49,9 +49,11 @@ vẫn dùng SQLite và header giả lập vai trò để phát triển, còn Ren
 
 ## Optional Gemini query expansion
 
-Add `GEMINI_API_KEY` in Render Environment to enable server-side AI query expansion. Keep the key secret. `GEMINI_MODEL=gemini-3.5-flash`, `MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES=3`, and `MINH_CHUNG_GEMINI_TIMEOUT_SECONDS=4` are configured by the Blueprint.
+Add `GEMINI_API_KEY` in Render Environment to enable server-side AI query expansion and the citation-aware revision assistant. Keep the key secret. `GEMINI_MODEL=gemini-3-flash-preview`, `MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES=3`, `MINH_CHUNG_GEMINI_TIMEOUT_SECONDS=4`, `MINH_CHUNG_GEMINI_REVISION_TIMEOUT_SECONDS=45`, and `MINH_CHUNG_GEMINI_REVISION_MAX_INPUT_CHARS=30000` are configured by the Blueprint. A stale `GEMINI_MODEL=gemini-3.5-flash` value is automatically migrated to the official model ID.
 
 This option sends up to `12,000` characters of submitted text to Gemini only when an exact source has not already been found. It generates additional search queries; similarity percentages still require evidence from indexed source URLs. Free-tier Gemini API content may be used by Google to improve its products, so do not use this option for confidential documents.
+
+The revision assistant can send a submitted draft of up to `30,000` characters to Gemini after the user explicitly asks for a citation-aware revision. It scans the draft and the proposed revision with Minh Chứng. It does not bypass similarity tools or call Turnitin without an official licensed API integration.
 
 ## Optional OpenAI fallback
 

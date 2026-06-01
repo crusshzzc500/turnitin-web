@@ -440,6 +440,7 @@ class WebDiscovery:
                     "required": ["queries"],
                     "additionalProperties": False,
                 },
+                "thinkingConfig": {"thinkingLevel": "minimal"},
                 "maxOutputTokens": 240,
                 "temperature": 0.2,
             },

@@ -51,6 +51,7 @@ const state = {
   sources: [...builtInSources],
   reportText: "",
   report: null,
+  writingAssistantResult: null,
   backendAvailable: false,
   pendingFile: null,
   analysisJob: null,
@@ -118,6 +119,17 @@ const elements = {
   metricMatches: document.querySelector("#metric-matches"),
   metricSources: document.querySelector("#metric-sources"),
   reportDiscoverySummary: document.querySelector("#report-discovery-summary"),
+  writingAssistantCard: document.querySelector("#writing-assistant-card"),
+  writingAssistantButton: document.querySelector("#writing-assistant-button"),
+  writingAssistantStatus: document.querySelector("#writing-assistant-status"),
+  writingAssistantResult: document.querySelector("#writing-assistant-result"),
+  writingAssistantText: document.querySelector("#writing-assistant-text"),
+  revisionOriginalScore: document.querySelector("#revision-original-score"),
+  revisionVerificationScore: document.querySelector("#revision-verification-score"),
+  writingAssistantNotes: document.querySelector("#writing-assistant-notes"),
+  writingAssistantCitations: document.querySelector("#writing-assistant-citations"),
+  writingAssistantNotice: document.querySelector("#writing-assistant-notice"),
+  applyWritingAssistantText: document.querySelector("#apply-writing-assistant-text"),
   matchedSources: document.querySelector("#matched-sources"),
   integrityFlags: document.querySelector("#integrity-flags"),
   sourceLibrary: document.querySelector("#source-library"),
@@ -239,6 +251,8 @@ function setAnalysisProgress(job = {}, visible = true) {
     extracting: "Đang đọc nội dung tài liệu",
     web_discovery: "Đang quét nguồn web công khai",
     matching: "Đang đối chiếu nguồn",
+    revising: "Gemini đang chỉnh sửa có dẫn nguồn",
+    verifying: "Đang tự rà lại bản đề xuất",
     finalizing: "Đang hoàn thiện báo cáo",
     completed: "Đã hoàn tất báo cáo",
     failed: "Không thể hoàn tất báo cáo"
@@ -314,6 +328,23 @@ async function createUploadAnalysisJob(file) {
   return payload;
 }
 
+async function createCitationRevisionJob(text) {
+  return apiRequest("/api/analysis-jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      kind: "citation-revision",
+      text,
+      enableWebSearch: elements.enableWebSearch.checked,
+      webSearchMaxResults: 10,
+      settings: {
+        excludeQuotes: elements.filterQuotes.checked,
+        excludeBibliography: elements.filterBibliography.checked,
+        minimumWords: Number(elements.filterMinimum.value)
+      }
+    })
+  });
+}
+
 function permissions() {
   return state.session?.permissions || {};
 }
@@ -332,6 +363,7 @@ function applySessionUI() {
   elements.userSwitcher.hidden = publicMode || authRequired;
   elements.logoutButton.hidden = !authRequired || !state.session;
   elements.indexSubmissionOption.hidden = publicMode;
+  elements.writingAssistantCard.hidden = !state.report || !state.health?.writingAssistant?.enabled;
   if (publicMode) elements.indexSubmission.checked = false;
   elements.downloadReportPdf.hidden = !state.backendAvailable || !state.report?.reportId;
   const providers = state.health?.webDiscovery || {};
@@ -609,6 +641,32 @@ function renderIntegrityFlags(flags) {
         </article>`
     )
     .join("");
+}
+
+function renderWritingAssistantResult(result) {
+  state.writingAssistantResult = result;
+  elements.revisionOriginalScore.textContent = `${Number(result.originalReport?.percent || 0)}%`;
+  elements.revisionVerificationScore.textContent = `${Number(result.verificationReport?.percent || 0)}%`;
+  elements.writingAssistantText.value = result.revision || "";
+  const notes = result.editorNotes || [];
+  elements.writingAssistantNotes.innerHTML = notes.length
+    ? notes.map((note) => `<li>${escapeHtml(String(note))}</li>`).join("")
+    : "<li>Hãy đọc lại toàn bộ bản đề xuất trước khi sử dụng.</li>";
+  const citations = result.citationNotes || [];
+  elements.writingAssistantCitations.innerHTML = citations.length
+    ? citations
+        .map((note) => {
+          const sourceUrl = safeExternalUrl(note.sourceUrl || "");
+          const label = `${note.marker || "[Nguồn]"} ${note.sourceTitle || "Nguồn cần kiểm tra"}`;
+          return `<li><strong>${escapeHtml(label)}</strong>${sourceUrl ? ` · <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">mở nguồn</a>` : ""}<br>${escapeHtml(note.reason || "")}</li>`;
+        })
+        .join("")
+    : "<li>Chưa có ghi chú nguồn cụ thể. Kiểm tra lại các vị trí [Cần trích dẫn nguồn] trong bài.</li>";
+  elements.writingAssistantNotice.textContent = `${result.notice || ""} ${result.checkerNotice || ""}`.trim();
+  elements.writingAssistantStatus.textContent = result.externalWebVerification
+    ? "Đã quét lại bản đề xuất bằng kho nguồn và các nguồn web công khai đã cấu hình."
+    : "Đã rà lại bằng kho nguồn hiện có. Bật quét web để kiểm tra rộng hơn.";
+  elements.writingAssistantResult.hidden = false;
 }
 
 async function refreshReport({ saveReport = false } = {}) {
@@ -1057,6 +1115,8 @@ elements.analyzeButton.addEventListener("click", async () => {
   }
   elements.analyzeButton.disabled = true;
   elements.analyzeButtonLabel.textContent = "Đang kiểm tra...";
+  state.writingAssistantResult = null;
+  elements.writingAssistantResult.hidden = true;
   setAnalysisProgress({ progress: 1, phase: "queued", message: "Đang xếp tài liệu vào hàng xử lý." });
   try {
     if (state.pendingFile && state.backendAvailable) {
@@ -1087,6 +1147,47 @@ elements.analyzeButton.addEventListener("click", async () => {
 });
 
 elements.backToChecker.addEventListener("click", () => setView("checker"));
+
+elements.writingAssistantButton.addEventListener("click", async () => {
+  if (!state.backendAvailable || !state.reportText) {
+    showToast("Hãy tạo báo cáo trước khi dùng trợ lý Gemini.");
+    return;
+  }
+  if (!elements.enableWebSearch.checked) {
+    showToast("Hãy bật quét web để bản đề xuất được rà lại rộng hơn trước khi hiển thị.");
+    return;
+  }
+  elements.writingAssistantButton.disabled = true;
+  elements.writingAssistantButton.textContent = "Gemini đang xử lý...";
+  elements.writingAssistantStatus.textContent =
+    "Đang rà nguồn, tạo bản đề xuất có dẫn nguồn và tự kiểm tra lại. Quá trình này có thể lâu hơn một lượt quét thường.";
+  setAnalysisProgress({ progress: 1, phase: "queued", message: "Đang xếp yêu cầu chỉnh sửa vào hàng xử lý." });
+  try {
+    const result = await pollAnalysisJob(await createCitationRevisionJob(state.reportText));
+    renderWritingAssistantResult(result);
+    setAnalysisProgress({ progress: 100, phase: "completed", message: "Đã tạo và tự rà lại bản đề xuất." });
+    showToast("Đã tạo bản đề xuất có dẫn nguồn. Hãy đọc lại trước khi áp dụng.");
+  } catch (error) {
+    elements.writingAssistantStatus.textContent = error.message;
+    setAnalysisProgress({ progress: state.analysisJob?.progress || 1, phase: "failed", message: error.message });
+    showToast(error.message);
+  } finally {
+    elements.writingAssistantButton.disabled = false;
+    elements.writingAssistantButton.textContent = "Tạo bản đề xuất và tự rà lại";
+  }
+});
+
+elements.applyWritingAssistantText.addEventListener("click", () => {
+  const revision = state.writingAssistantResult?.revision || "";
+  if (!revision) return;
+  state.pendingFile = null;
+  elements.fileInput.value = "";
+  elements.fileLabel.textContent = "Bản đề xuất Gemini";
+  elements.documentText.value = revision;
+  updateWordCounter();
+  setView("checker");
+  showToast("Đã đưa bản đề xuất sang ô chỉnh sửa. Hãy đọc lại và kiểm tra lần cuối.");
+});
 
 [elements.filterQuotes, elements.filterBibliography].forEach((input) => {
   input.addEventListener("change", async () => {

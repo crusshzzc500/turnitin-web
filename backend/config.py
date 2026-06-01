@@ -5,6 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def normalize_gemini_model(value: str) -> str:
+    model = value.strip() or "gemini-3-flash-preview"
+    return {
+        "gemini-3.5-flash": "gemini-3-flash-preview",
+    }.get(model, model)
+
+
 @dataclass(frozen=True)
 class Settings:
     root_dir: Path
@@ -34,9 +41,11 @@ class Settings:
     serper_api_key: str = ""
     brave_search_api_key: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     gemini_query_expansion_max_queries: int = 3
     gemini_timeout_seconds: float = 4.0
+    gemini_revision_timeout_seconds: float = 45.0
+    gemini_revision_max_input_chars: int = 30_000
     openai_api_key: str = ""
     openai_model: str = "gpt-5-nano"
     openai_query_expansion_max_queries: int = 3
@@ -103,7 +112,7 @@ class Settings:
             serper_api_key=os.getenv("SERPER_API_KEY", "").strip(),
             brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY", "").strip(),
             gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash",
+            gemini_model=normalize_gemini_model(os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")),
             gemini_query_expansion_max_queries=max(
                 0,
                 min(4, int(os.getenv("MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES", "3"))),
@@ -111,6 +120,14 @@ class Settings:
             gemini_timeout_seconds=max(
                 1.0,
                 min(6.0, float(os.getenv("MINH_CHUNG_GEMINI_TIMEOUT_SECONDS", "4"))),
+            ),
+            gemini_revision_timeout_seconds=max(
+                10.0,
+                min(90.0, float(os.getenv("MINH_CHUNG_GEMINI_REVISION_TIMEOUT_SECONDS", "45"))),
+            ),
+            gemini_revision_max_input_chars=max(
+                4_000,
+                min(50_000, int(os.getenv("MINH_CHUNG_GEMINI_REVISION_MAX_INPUT_CHARS", "30000"))),
             ),
             openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-5-nano").strip() or "gpt-5-nano",
