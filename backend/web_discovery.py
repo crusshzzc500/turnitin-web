@@ -87,6 +87,11 @@ def _exact_phrase_query(value: str, *, maximum_words: int = 18) -> str:
 
 
 def _focused_content_window(value: str, anchors: list[str], *, maximum_chars: int = 12_000) -> str:
+    normalized_value = re.sub(r"\s+", " ", value).strip().casefold()
+    for anchor in anchors:
+        normalized_anchor = re.sub(r"\s+", " ", anchor).strip()
+        if 500 <= len(normalized_anchor) <= maximum_chars and normalized_anchor.casefold() in normalized_value:
+            return normalized_anchor
     if len(value) <= maximum_chars:
         return value
     folded_value = value.casefold()

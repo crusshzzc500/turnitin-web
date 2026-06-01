@@ -852,6 +852,12 @@ class WebDiscoveryTest(unittest.TestCase):
         self.assertLessEqual(len(focused), 500)
         self.assertIn(anchor, focused)
 
+    def test_focused_content_window_prefers_complete_submitted_article(self) -> None:
+        article = " ".join(f"article-word-{index}" for index in range(80))
+        page = f"{'navigation ' * 200}{article}{'related-article ' * 200}"
+        focused = _focused_content_window(page, [article], maximum_chars=4_000)
+        self.assertEqual(focused, article)
+
     def test_tracking_urls_are_normalized_before_indexing(self) -> None:
         self.assertEqual(
             normalize_candidate_url("HTTPS://Example.org/article/?utm_source=test&fbclid=123#section"),
