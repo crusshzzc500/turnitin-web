@@ -12,7 +12,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
-from .text import count_words, normalize_display_text, split_sentences, tokenize
+from .text import count_words, fold_text, normalize_display_text, split_sentences, tokenize
 
 
 STOPWORDS = {
@@ -262,6 +262,8 @@ class WebDiscovery:
                 progress_callback,
                 comparison_text=text,
             )
+        if self._has_exact_document_match(result):
+            return result.to_dict()
         if (
             self.settings.tavily_api_key
             and (result is None or self._time_available())
@@ -276,6 +278,8 @@ class WebDiscovery:
                 comparison_text=text,
             )
             result = primary if result is None else self._merge_results(result, primary)
+        if self._has_exact_document_match(result):
+            return result.to_dict()
         if (
             self.settings.exa_api_key
             and self._time_available()
@@ -338,6 +342,10 @@ class WebDiscovery:
     @staticmethod
     def _remaining_result_limit(result_limit: int, result: DiscoveryResult | None) -> int:
         return max(0, min(10, result_limit - (result.indexed if result else 0)))
+
+    @staticmethod
+    def _has_exact_document_match(result: DiscoveryResult | None) -> bool:
+        return bool(result and any(source.get("exactDocumentMatch") for source in result.sources))
 
     @staticmethod
     def _merge_results(primary: DiscoveryResult, fallback: DiscoveryResult) -> DiscoveryResult:
@@ -419,6 +427,8 @@ class WebDiscovery:
             )
             if indexed:
                 sources.append(indexed)
+                if indexed.get("exactDocumentMatch"):
+                    break
             else:
                 skipped += 1
         if progress_callback:
@@ -840,6 +850,7 @@ class WebDiscovery:
             comparison_text=comparison_text,
         )
         relevance = candidate_relevance(query, title, content)
+        exact_document_match = bool(comparison_text and fold_text(comparison_text) in fold_text(content))
         seen_urls.add(canonical_url)
         namespace = str(organization_id) if organization_id is not None else "public"
         digest = hashlib.sha256(f"{namespace}:{canonical_url}".encode("utf-8")).hexdigest()[:32]
@@ -855,6 +866,7 @@ class WebDiscovery:
                 "canonicalUrl": canonical_url,
                 "relevanceScore": round(relevance, 3),
                 "enrichedFromPublicPage": enriched,
+                "exactDocumentMatch": exact_document_match,
             },
             organization_id=organization_id,
         )
@@ -863,6 +875,7 @@ class WebDiscovery:
             "title": (title.strip() or canonical_url)[:220],
             "url": canonical_url,
             "relevanceScore": round(relevance, 3),
+            "exactDocumentMatch": exact_document_match,
         }
 
     def _enrich_content(

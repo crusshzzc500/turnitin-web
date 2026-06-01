@@ -744,6 +744,33 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertLessEqual(len(serper.call_args.args[0]), 1)
             self.assertEqual(tavily_search.call_args.kwargs["initial_seen_urls"], {"https://example.org/serper"})
 
+    def test_exact_serper_match_skips_broad_fallback_search(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(
+                settings_for(root, tavily_api_key="tavily", serper_api_key="serper"),
+                storage,
+            )
+            text = "This complete copied document is long enough to verify that broad fallback search stops after an exact public match."
+            serper_result = DiscoveryResult(
+                "serper",
+                True,
+                True,
+                ["precision"],
+                1,
+                0,
+                "Serper found the exact source.",
+                [{"id": 1, "title": "Exact source", "url": "https://example.org/exact", "exactDocumentMatch": True}],
+            )
+            with (
+                patch.object(discovery, "_serper", return_value=serper_result),
+                patch.object(discovery, "_tavily") as tavily,
+            ):
+                result = discovery.discover_and_index(text, organization_id=1)
+            self.assertEqual(result["provider"], "serper")
+            tavily.assert_not_called()
+
     def test_new_fallbacks_run_between_exa_and_serper_when_sources_are_still_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
