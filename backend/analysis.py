@@ -7,6 +7,7 @@ from .integrity import scan_text
 from .search import SearchBackend
 from .text import (
     count_words,
+    fold_text,
     has_citation,
     is_bibliography_heading,
     is_quoted,
@@ -37,6 +38,14 @@ class SimilarityAnalyzer:
         document_candidates = self.search_backend.search_chunks(text, limit=500, organization_id=organization_id)
 
         def score_candidates(segment: str, candidates: list[dict[str, Any]]) -> list[tuple[float, dict[str, Any]]]:
+            folded_segment = fold_text(segment)
+            exact = [
+                (1.0, candidate)
+                for candidate in candidates
+                if folded_segment and folded_segment in fold_text(candidate["text_content"])
+            ]
+            if exact:
+                return exact
             scored = []
             for candidate in candidates:
                 score = similarity(segment, candidate["text_content"])

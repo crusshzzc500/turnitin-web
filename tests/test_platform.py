@@ -303,6 +303,22 @@ class SimilarityAnalyzerTest(unittest.TestCase):
         self.assertEqual(report["percent"], 100)
         backend.search_chunks.assert_called_once_with(text, limit=500, organization_id=None)
 
+    def test_exact_candidate_skips_expensive_similarity_scoring(self) -> None:
+        backend = Mock()
+        text = "This complete copied sentence has enough words to be matched exactly against the indexed public source."
+        backend.search_chunks.return_value = [
+            {
+                "source_id": 1,
+                "title": "Public source",
+                "url": "https://example.org/source",
+                "source_type": "website",
+                "text_content": f"Intro text. {text} Related text.",
+            }
+        ]
+        with patch("backend.analysis.similarity", side_effect=AssertionError("slow scorer should not run")):
+            report = SimilarityAnalyzer(backend).analyze(text)
+        self.assertEqual(report["percent"], 100)
+
     def test_finds_matching_source_and_integrity_flag(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             storage = Storage(Path(directory) / "test.db")
