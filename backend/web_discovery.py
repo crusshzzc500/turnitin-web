@@ -273,6 +273,7 @@ class WebDiscovery:
                 self._remaining_result_limit(result_limit, result),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
+                comparison_text=text,
             )
             result = primary if result is None else self._merge_results(result, primary)
         if (
@@ -365,6 +366,7 @@ class WebDiscovery:
         max_results: int,
         progress_callback: DiscoveryProgressCallback | None = None,
         initial_seen_urls: set[str] | None = None,
+        comparison_text: str = "",
     ) -> DiscoveryResult:
         sources: list[dict[str, Any]] = []
         skipped = 0
@@ -399,6 +401,7 @@ class WebDiscovery:
                         organization_id=organization_id,
                         minimum_words=12,
                         seen_urls=seen_urls,
+                        comparison_text=comparison_text,
                     )
                     if indexed:
                         sources.append(indexed)
