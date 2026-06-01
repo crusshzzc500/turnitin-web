@@ -47,8 +47,14 @@ không dùng file SQLite trên Render; dữ liệu cần giữ lại được gh
 Không đặt `MINH_CHUNG_PUBLIC_MODE=1` cho bản cần lưu lịch sử. Bản local không có `DATABASE_URL`
 vẫn dùng SQLite và header giả lập vai trò để phát triển, còn Render dùng Neon và đăng nhập mật khẩu.
 
-## Optional OpenAI query expansion
+## Optional Gemini query expansion
 
-Add `OPENAI_API_KEY` in Render Environment to enable server-side AI query expansion. Keep the key secret. `OPENAI_MODEL=gpt-5-nano`, `MINH_CHUNG_OPENAI_QUERY_EXPANSION_MAX_QUERIES=3`, and `MINH_CHUNG_OPENAI_TIMEOUT_SECONDS=4` are configured by the Blueprint.
+Add `GEMINI_API_KEY` in Render Environment to enable server-side AI query expansion. Keep the key secret. `GEMINI_MODEL=gemini-3.5-flash`, `MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES=3`, and `MINH_CHUNG_GEMINI_TIMEOUT_SECONDS=4` are configured by the Blueprint.
+
+This option sends up to `12,000` characters of submitted text to Gemini only when an exact source has not already been found. It generates additional search queries; similarity percentages still require evidence from indexed source URLs. Free-tier Gemini API content may be used by Google to improve its products, so do not use this option for confidential documents.
+
+## Optional OpenAI fallback
+
+Add `OPENAI_API_KEY` in Render Environment to use OpenAI only when Gemini is unavailable or returns no useful expansion queries. Keep the key secret. `OPENAI_MODEL=gpt-5-nano`, `MINH_CHUNG_OPENAI_QUERY_EXPANSION_MAX_QUERIES=3`, and `MINH_CHUNG_OPENAI_TIMEOUT_SECONDS=4` are configured by the Blueprint.
 
 This option sends up to `12,000` characters of submitted text to OpenAI only when an exact source has not already been found. It generates additional search queries; similarity percentages still require evidence from indexed source URLs. OpenAI API usage is billed separately from a ChatGPT subscription.

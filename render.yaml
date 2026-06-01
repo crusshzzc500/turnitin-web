@@ -46,6 +46,14 @@ services:
         value: "1"
       - key: MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES
         value: "2"
+      - key: GEMINI_MODEL
+        value: "gemini-3.5-flash"
+      - key: MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES
+        value: "3"
+      - key: MINH_CHUNG_GEMINI_TIMEOUT_SECONDS
+        value: "4"
+      - key: GEMINI_API_KEY
+        sync: false
       - key: OPENAI_MODEL
         value: "gpt-5-nano"
       - key: MINH_CHUNG_OPENAI_QUERY_EXPANSION_MAX_QUERIES

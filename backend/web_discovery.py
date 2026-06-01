@@ -9,7 +9,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib.parse import parse_qsl, quote_plus, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, quote_plus, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from .text import count_words, fold_text, normalize_display_text, split_sentences, tokenize
@@ -232,6 +232,7 @@ class WebDiscovery:
             "linkup": bool(self.settings.linkup_api_key),
             "serper": bool(self.settings.serper_api_key),
             "brave": bool(self.settings.brave_search_api_key),
+            "geminiQueryExpansion": bool(self.settings.gemini_api_key),
             "openaiQueryExpansion": bool(self.settings.openai_api_key),
         }
 
@@ -265,7 +266,12 @@ class WebDiscovery:
             )
         if self._has_exact_document_match(result):
             return result.to_dict()
-        queries = self._expand_queries_with_openai(text, queries)
+        gemini_queries = self._expand_queries_with_gemini(text, queries)
+        queries = (
+            gemini_queries
+            if gemini_queries != queries
+            else self._expand_queries_with_openai(text, queries)
+        )
         if (
             self.settings.tavily_api_key
             and (result is None or self._time_available())
@@ -395,6 +401,67 @@ class WebDiscovery:
             return queries
         if not isinstance(expanded, list):
             return queries
+        return self._merge_expanded_queries(queries, expanded, maximum)
+
+    def _expand_queries_with_gemini(self, text: str, queries: list[str]) -> list[str]:
+        maximum = self.settings.gemini_query_expansion_max_queries
+        if (
+            not self.settings.gemini_api_key
+            or maximum <= 0
+            or not self._time_available(self.settings.gemini_timeout_seconds + 0.5)
+        ):
+            return queries
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": (
+                                "Create precise public-web search queries for plagiarism source discovery. "
+                                "Return only phrases likely to locate the original source or close paraphrases. "
+                                "Do not assess plagiarism, invent sources, or include explanations.\n\n"
+                                f"Submitted text:\n{text[:12_000]}"
+                            )
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": {
+                    "type": "object",
+                    "properties": {
+                        "queries": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": maximum,
+                        }
+                    },
+                    "required": ["queries"],
+                    "additionalProperties": False,
+                },
+                "maxOutputTokens": 240,
+                "temperature": 0.2,
+            },
+        }
+        try:
+            response = self._json_request(
+                (
+                    "https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{quote(self.settings.gemini_model, safe='')}:generateContent"
+                ),
+                payload,
+                headers={"x-goog-api-key": self.settings.gemini_api_key},
+                timeout=min(self.settings.gemini_timeout_seconds, self._request_timeout()),
+            )
+            expanded = json.loads(self._gemini_output_text(response)).get("queries", [])
+        except Exception:
+            return queries
+        if not isinstance(expanded, list):
+            return queries
+        return self._merge_expanded_queries(queries, expanded, maximum)
+
+    def _merge_expanded_queries(self, queries: list[str], expanded: list[Any], maximum: int) -> list[str]:
         base_limit = max(1, self.settings.web_discovery_max_queries - maximum)
         merged = list(queries[:base_limit])
         seen = {query.casefold() for query in merged}
@@ -406,6 +473,14 @@ class WebDiscovery:
             if len(merged) >= self.settings.web_discovery_max_queries:
                 break
         return merged if len(merged) > min(len(queries), base_limit) else queries
+
+    @staticmethod
+    def _gemini_output_text(response: dict[str, Any]) -> str:
+        for candidate in response.get("candidates") or []:
+            for part in (candidate.get("content") or {}).get("parts") or []:
+                if isinstance(part.get("text"), str):
+                    return str(part["text"])
+        return "{}"
 
     @staticmethod
     def _response_output_text(response: dict[str, Any]) -> str:

@@ -190,6 +190,7 @@ def settings_for(
     websearchapi_api_key: str = "",
     linkup_api_key: str = "",
     serper_api_key: str = "",
+    gemini_api_key: str = "",
     openai_api_key: str = "",
     public_mode: bool = False,
     auth_mode: str = "demo",
@@ -210,6 +211,7 @@ def settings_for(
         websearchapi_api_key=websearchapi_api_key,
         linkup_api_key=linkup_api_key,
         serper_api_key=serper_api_key,
+        gemini_api_key=gemini_api_key,
         openai_api_key=openai_api_key,
         public_mode=public_mode,
         auth_mode=auth_mode,
@@ -519,6 +521,83 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_gemini_expands_queries_with_structured_output_and_keeps_exact_query(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, gemini_api_key="gemini-test-key"), storage)
+            discovery._active_deadline = time.monotonic() + 10
+            captured: dict = {}
+            initial = [f'"exact phrase {index}"' for index in range(10)]
+
+            def fake_request(url, payload, *, headers, timeout):
+                captured.update({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            {"queries": ["semantic paraphrase search", "translated original phrase"]}
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+
+            with patch.object(discovery, "_json_request", side_effect=fake_request):
+                expanded = discovery._expand_queries_with_gemini("Submitted document text", initial)
+            self.assertEqual(
+                captured["url"],
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
+            )
+            self.assertEqual(captured["payload"]["generationConfig"]["responseMimeType"], "application/json")
+            self.assertEqual(
+                captured["payload"]["generationConfig"]["responseJsonSchema"]["properties"]["queries"]["maxItems"],
+                3,
+            )
+            self.assertEqual(captured["headers"]["x-goog-api-key"], "gemini-test-key")
+            self.assertEqual(expanded[0], initial[0])
+            self.assertIn("semantic paraphrase search", expanded)
+            self.assertLessEqual(len(expanded), 10)
+
+    def test_gemini_query_expansion_failure_keeps_existing_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, gemini_api_key="gemini-test-key"), storage)
+            discovery._active_deadline = time.monotonic() + 10
+            initial = ['"exact copied phrase"', "keyword signature"]
+            with patch.object(discovery, "_json_request", side_effect=TimeoutError):
+                self.assertEqual(discovery._expand_queries_with_gemini("Submitted document text", initial), initial)
+
+    def test_gemini_expansion_is_preferred_before_openai_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(
+                settings_for(
+                    root,
+                    tavily_api_key="tavily",
+                    gemini_api_key="gemini",
+                    openai_api_key="openai",
+                ),
+                storage,
+            )
+            text = "This submitted document contains enough public text to create a useful source discovery query."
+            tavily_result = DiscoveryResult("tavily", True, True, ["gemini query"], 0, 0, "No source.", [])
+            with (
+                patch.object(discovery, "_expand_queries_with_gemini", return_value=["gemini query"]),
+                patch.object(discovery, "_expand_queries_with_openai") as openai,
+                patch.object(discovery, "_tavily", return_value=tavily_result) as tavily,
+            ):
+                discovery.discover_and_index(text, organization_id=1)
+            openai.assert_not_called()
+            self.assertEqual(tavily.call_args.args[0], ["gemini query"])
+
     def test_openai_expands_queries_with_structured_output_and_keeps_exact_query(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -797,7 +876,7 @@ class WebDiscoveryTest(unittest.TestCase):
             root = Path(directory)
             storage = Storage(root / "test.db")
             discovery = WebDiscovery(
-                settings_for(root, tavily_api_key="tavily", serper_api_key="serper"),
+                settings_for(root, tavily_api_key="tavily", serper_api_key="serper", gemini_api_key="gemini"),
                 storage,
             )
             text = "This complete copied document is long enough to verify that broad fallback search stops after an exact public match."
@@ -813,10 +892,12 @@ class WebDiscoveryTest(unittest.TestCase):
             )
             with (
                 patch.object(discovery, "_serper", return_value=serper_result),
+                patch.object(discovery, "_expand_queries_with_gemini") as gemini,
                 patch.object(discovery, "_tavily") as tavily,
             ):
                 result = discovery.discover_and_index(text, organization_id=1)
             self.assertEqual(result["provider"], "serper")
+            gemini.assert_not_called()
             tavily.assert_not_called()
 
     def test_new_fallbacks_run_between_exa_and_serper_when_sources_are_still_missing(self) -> None:
@@ -1504,6 +1585,9 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["linkupDepth"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
                 self.assertEqual(health["webDiscoveryLimits"]["enrichmentMaxSources"], 2)
+                self.assertEqual(health["webDiscoveryLimits"]["geminiModel"], "gemini-3.5-flash")
+                self.assertEqual(health["webDiscoveryLimits"]["geminiExpansionMaxQueries"], 3)
+                self.assertEqual(health["webDiscoveryLimits"]["geminiTimeoutSeconds"], 4.0)
                 self.assertEqual(health["webDiscoveryLimits"]["openaiModel"], "gpt-5-nano")
                 self.assertEqual(health["webDiscoveryLimits"]["openaiExpansionMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["openaiTimeoutSeconds"], 4.0)

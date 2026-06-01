@@ -33,6 +33,10 @@ class Settings:
     linkup_api_key: str = ""
     serper_api_key: str = ""
     brave_search_api_key: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_query_expansion_max_queries: int = 3
+    gemini_timeout_seconds: float = 4.0
     openai_api_key: str = ""
     openai_model: str = "gpt-5-nano"
     openai_query_expansion_max_queries: int = 3
@@ -98,6 +102,16 @@ class Settings:
             linkup_api_key=os.getenv("LINKUP_API_KEY", "").strip(),
             serper_api_key=os.getenv("SERPER_API_KEY", "").strip(),
             brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY", "").strip(),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash",
+            gemini_query_expansion_max_queries=max(
+                0,
+                min(4, int(os.getenv("MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES", "3"))),
+            ),
+            gemini_timeout_seconds=max(
+                1.0,
+                min(6.0, float(os.getenv("MINH_CHUNG_GEMINI_TIMEOUT_SECONDS", "4"))),
+            ),
             openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-5-nano").strip() or "gpt-5-nano",
             openai_query_expansion_max_queries=max(

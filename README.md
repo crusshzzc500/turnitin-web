@@ -142,9 +142,23 @@ Kiểm tra trạng thái bằng `GET /api/ocr/status`.
 Minh Chứng hỗ trợ rà soát liêm chính học thuật. Tỷ lệ tương đồng không phải là
 kết luận tự động về đạo văn.
 
-## Optional OpenAI query expansion
+## Optional Gemini query expansion
 
-Set `OPENAI_API_KEY` on the server to let `gpt-5-nano` generate up to `3` additional public-web search queries when an exact source has not already been found. The model improves query coverage only: reported similarity still requires text evidence from indexed source URLs.
+Set `GEMINI_API_KEY` on the server to let `gemini-3.5-flash` generate up to `3` additional public-web search queries when an exact source has not already been found. Gemini is tried first because it has a free API tier suitable for small projects. The model improves query coverage only: reported similarity still requires text evidence from indexed source URLs.
+
+When this option is enabled, the server may send up to `12,000` characters from the submitted text to Gemini. Free-tier Gemini API content may be used by Google to improve its products, so do not enable this option for confidential documents. Without `GEMINI_API_KEY`, no text is sent to Gemini and the existing web search flow continues unchanged. Keep the key in Render Environment variables only; do not commit it or include it in a ZIP file.
+
+Optional tuning variables:
+
+```powershell
+$env:GEMINI_MODEL = 'gemini-3.5-flash'
+$env:MINH_CHUNG_GEMINI_QUERY_EXPANSION_MAX_QUERIES = '3'
+$env:MINH_CHUNG_GEMINI_TIMEOUT_SECONDS = '4'
+```
+
+## Optional OpenAI fallback
+
+Set `OPENAI_API_KEY` on the server to use `gpt-5-nano` as a fallback when Gemini is unavailable or returns no useful expansion queries.
 
 When this option is enabled, the server may send up to `12,000` characters from the submitted text to OpenAI. Without `OPENAI_API_KEY`, no text is sent to OpenAI and the existing web search flow continues unchanged. Keep the key in Render Environment variables only; do not commit it or include it in a ZIP file.
 
