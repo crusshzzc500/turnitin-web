@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import threading
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
@@ -184,6 +185,7 @@ class WebDiscovery:
         self.crawler: Any | None = None
         self._enrichment_lock = threading.Lock()
         self._enrichment_remaining = 0
+        self._active_deadline = 0.0
 
     def attach_crawler(self, crawler: Any) -> None:
         self.crawler = crawler
@@ -206,6 +208,7 @@ class WebDiscovery:
         max_results: int | None = None,
         progress_callback: DiscoveryProgressCallback | None = None,
     ) -> dict[str, Any]:
+        self._active_deadline = time.monotonic() + self.settings.web_discovery_time_budget_seconds
         with self._enrichment_lock:
             self._enrichment_remaining = self.settings.web_discovery_enrichment_max_sources
         queries = build_queries(text, max_queries=self.settings.web_discovery_max_queries)
@@ -221,6 +224,7 @@ class WebDiscovery:
             result = self._tavily(queries, organization_id, result_limit, progress_callback)
         if (
             self.settings.exa_api_key
+            and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
         ):
             fallback = self._exa(
@@ -233,6 +237,7 @@ class WebDiscovery:
             result = fallback if result is None else self._merge_results(result, fallback)
         if (
             self.settings.websearchapi_api_key
+            and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
         ):
             fallback = self._websearchapi(
@@ -245,6 +250,7 @@ class WebDiscovery:
             result = fallback if result is None else self._merge_results(result, fallback)
         if (
             self.settings.linkup_api_key
+            and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
         ):
             fallback = self._linkup(
@@ -257,6 +263,7 @@ class WebDiscovery:
             result = fallback if result is None else self._merge_results(result, fallback)
         if (
             self.settings.serper_api_key
+            and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
         ):
             fallback = self._serper(
@@ -269,7 +276,7 @@ class WebDiscovery:
             result = fallback if result is None else self._merge_results(result, fallback)
         if result is not None:
             return result.to_dict()
-        if self.settings.brave_search_api_key:
+        if self.settings.brave_search_api_key and self._time_available():
             return self._brave(queries, organization_id, result_limit, progress_callback).to_dict()
         if progress_callback:
             progress_callback(len(queries), len(queries), 0)
@@ -321,7 +328,7 @@ class WebDiscovery:
         try:
             pending = {executor.submit(self._fetch_tavily, query, max_results): query for query in queries}
             for completed, future in enumerate(
-                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                as_completed(pending, timeout=self._phase_timeout()),
                 start=1,
             ):
                 query = pending[future]
@@ -382,7 +389,7 @@ class WebDiscovery:
         try:
             pending = {executor.submit(self._fetch_brave, query, max_results): query for query in queries}
             for completed, future in enumerate(
-                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                as_completed(pending, timeout=self._phase_timeout()),
                 start=1,
             ):
                 query = pending[future]
@@ -446,7 +453,7 @@ class WebDiscovery:
         try:
             pending = {executor.submit(self._fetch_exa, query, max_results): query for query in queries}
             for completed, future in enumerate(
-                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                as_completed(pending, timeout=self._phase_timeout()),
                 start=1,
             ):
                 query = pending[future]
@@ -511,7 +518,7 @@ class WebDiscovery:
         try:
             pending = {executor.submit(self._fetch_serper, query, max_results): query for query in queries}
             for completed, future in enumerate(
-                as_completed(pending, timeout=self.settings.web_discovery_time_budget_seconds),
+                as_completed(pending, timeout=self._phase_timeout()),
                 start=1,
             ):
                 query = pending[future]
@@ -569,6 +576,8 @@ class WebDiscovery:
         seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         for completed, query in enumerate(queries, start=1):
+            if not self._time_available():
+                break
             try:
                 data = self._fetch_websearchapi(query, max_results)
             except Exception as error:
@@ -615,6 +624,8 @@ class WebDiscovery:
         seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         for completed, query in enumerate(queries, start=1):
+            if not self._time_available():
+                break
             try:
                 data = self._fetch_linkup(query, max_results)
             except Exception as error:
@@ -658,14 +669,14 @@ class WebDiscovery:
                 "include_answer": False,
             },
             headers={"Authorization": f"Bearer {self.settings.tavily_api_key}"},
-            timeout=self.settings.web_discovery_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
 
     def _fetch_brave(self, query: str, max_results: int) -> dict[str, Any]:
         return self._get_json(
             f"https://api.search.brave.com/res/v1/web/search?q={quote_plus(query)}&count={max_results}",
             headers={"X-Subscription-Token": self.settings.brave_search_api_key},
-            timeout=self.settings.web_discovery_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
 
     def _fetch_exa(self, query: str, max_results: int) -> dict[str, Any]:
@@ -678,7 +689,7 @@ class WebDiscovery:
                 "contents": {"highlights": {"maxCharacters": 1200}},
             },
             headers={"x-api-key": self.settings.exa_api_key},
-            timeout=self.settings.web_discovery_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
 
     def _fetch_serper(self, query: str, max_results: int) -> dict[str, Any]:
@@ -686,7 +697,7 @@ class WebDiscovery:
             "https://google.serper.dev/search",
             {"q": query, "num": max_results},
             headers={"X-API-KEY": self.settings.serper_api_key},
-            timeout=self.settings.web_discovery_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
 
     def _fetch_websearchapi(self, query: str, max_results: int) -> dict[str, Any]:
@@ -700,7 +711,7 @@ class WebDiscovery:
                 "safeSearch": True,
             },
             headers={"Authorization": f"Bearer {self.settings.websearchapi_api_key}"},
-            timeout=self.settings.web_discovery_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
 
     def _fetch_linkup(self, query: str, max_results: int) -> dict[str, Any]:
@@ -714,7 +725,7 @@ class WebDiscovery:
                 "maxResults": max_results,
             },
             headers={"Authorization": f"Bearer {self.settings.linkup_api_key}"},
-            timeout=self.settings.web_discovery_request_timeout_seconds,
+            timeout=self._request_timeout(),
         )
 
     def _index_candidate(
@@ -767,23 +778,47 @@ class WebDiscovery:
         }
 
     def _enrich_content(self, canonical_url: str, content: str) -> tuple[str, bool]:
-        if not self.crawler or count_words(content) >= 140:
+        if not self.crawler or count_words(content) >= 140 or not self._time_available(4.0):
             return content, False
         with self._enrichment_lock:
             if self._enrichment_remaining <= 0:
                 return content, False
             self._enrichment_remaining -= 1
+        executor = ThreadPoolExecutor(max_workers=1)
         try:
-            normalized = self.crawler.url_policy.validate(canonical_url)
-            if not self.crawler.robots.allowed(normalized):
-                return content, False
-            result = self.crawler._fetch(normalized)
-            enriched = normalize_display_text(result.text).strip()[: self.settings.web_discovery_max_content_chars]
+            future = executor.submit(self._fetch_enriched_content, canonical_url)
+            enriched = future.result(timeout=min(3.0, max(0.5, self._time_remaining() - 1.0)))
             if count_words(enriched) > count_words(content):
                 return enriched, True
         except Exception:
             return content, False
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         return content, False
+
+    def _fetch_enriched_content(self, canonical_url: str) -> str:
+        try:
+            normalized = self.crawler.url_policy.validate(canonical_url)
+            if not self.crawler.robots.allowed(normalized):
+                return ""
+            result = self.crawler._fetch(normalized)
+            return normalize_display_text(result.text).strip()[: self.settings.web_discovery_max_content_chars]
+        except Exception:
+            return ""
+
+    def _time_remaining(self) -> float:
+        if not self._active_deadline:
+            return self.settings.web_discovery_time_budget_seconds
+        return max(0.0, self._active_deadline - time.monotonic())
+
+    def _time_available(self, minimum_seconds: float = 0.75) -> bool:
+        return self._time_remaining() >= minimum_seconds
+
+    def _phase_timeout(self) -> float:
+        return max(0.001, min(self.settings.web_discovery_time_budget_seconds, self._time_remaining()))
+
+    def _request_timeout(self) -> float:
+        return max(0.5, min(self.settings.web_discovery_request_timeout_seconds, self._time_remaining()))
 
     @staticmethod
     def _json_request(

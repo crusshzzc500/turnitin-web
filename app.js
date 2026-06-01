@@ -323,7 +323,7 @@ function applySessionUI() {
   const publicMode = Boolean(state.health?.publicMode);
   const authRequired = Boolean(state.health?.authRequired);
   const maxQueries = Number(state.health?.webDiscoveryLimits?.queries || 10);
-  const timeBudget = Number(state.health?.webDiscoveryLimits?.timeBudgetSeconds || 150);
+  const timeBudget = Number(state.health?.webDiscoveryLimits?.timeBudgetSeconds || 22);
   updateUploadLimit();
   elements.sourceAdder.hidden = !access.manageSources;
   elements.crawlerCard.hidden = !access.manageCrawler;

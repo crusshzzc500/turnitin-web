@@ -331,6 +331,22 @@ class ConfigTest(unittest.TestCase):
             self.assertFalse(settings.public_mode)
             self.assertEqual(settings.auth_mode, "password")
 
+    def test_web_discovery_speed_limits_clamp_stale_environment_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                os.environ,
+                {
+                    "MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS": "150",
+                    "MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS": "45",
+                    "MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES": "4",
+                },
+                clear=True,
+            ):
+                settings = Settings.from_env(Path(directory))
+            self.assertEqual(settings.web_discovery_time_budget_seconds, 25.0)
+            self.assertEqual(settings.web_discovery_request_timeout_seconds, 8.0)
+            self.assertEqual(settings.web_discovery_enrichment_max_sources, 2)
+
 
 class SearchBackendTest(unittest.TestCase):
     def test_opensearch_adapter_indexes_deletes_searches_and_reports_status(self) -> None:
@@ -412,7 +428,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertFalse(captured["payload"]["includeContent"])
             self.assertFalse(captured["payload"]["includeAnswer"])
             self.assertEqual(captured["headers"]["Authorization"], "Bearer websearch-test-key")
-            self.assertEqual(captured["timeout"], 45.0)
+            self.assertEqual(captured["timeout"], 7.0)
 
     def test_linkup_uses_fast_search_results_with_server_side_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -431,7 +447,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(captured["payload"]["depth"], "fast")
             self.assertEqual(captured["payload"]["outputType"], "searchResults")
             self.assertEqual(captured["headers"]["Authorization"], "Bearer linkup-test-key")
-            self.assertEqual(captured["timeout"], 45.0)
+            self.assertEqual(captured["timeout"], 7.0)
 
     def test_serper_uses_one_query_shape_with_server_side_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -449,7 +465,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(captured["url"], "https://google.serper.dev/search")
             self.assertEqual(captured["payload"], {"q": "academic integrity", "num": 10})
             self.assertEqual(captured["headers"]["X-API-KEY"], "serper-test-key")
-            self.assertEqual(captured["timeout"], 45.0)
+            self.assertEqual(captured["timeout"], 7.0)
 
     def test_serper_hard_caps_queries_even_if_called_with_more_than_one(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -497,7 +513,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(captured["payload"]["numResults"], 10)
             self.assertEqual(captured["payload"]["contents"]["highlights"]["maxCharacters"], 1200)
             self.assertEqual(captured["headers"]["x-api-key"], "exa-test-key")
-            self.assertEqual(captured["timeout"], 45.0)
+            self.assertEqual(captured["timeout"], 7.0)
 
     def test_exa_fallback_runs_only_when_tavily_returns_too_few_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -652,7 +668,7 @@ class WebDiscoveryTest(unittest.TestCase):
                 discovery._fetch_tavily("liêm chính học thuật", 10)
             self.assertEqual(captured["payload"]["search_depth"], "fast")
             self.assertFalse(captured["payload"]["include_raw_content"])
-            self.assertEqual(captured["timeout"], 45.0)
+            self.assertEqual(captured["timeout"], 7.0)
 
     def test_build_queries_selects_a_small_number_of_excerpts(self) -> None:
         text = (
@@ -892,6 +908,29 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 0.12)
             self.assertIn("Đã dừng chờ", result["message"])
 
+    def test_global_deadline_skips_fallback_after_primary_uses_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            settings = replace(
+                settings_for(root, tavily_api_key="tavily", exa_api_key="exa"),
+                web_discovery_time_budget_seconds=0.03,
+            )
+            discovery = WebDiscovery(settings, storage)
+            text = "Nội dung đủ dài để xác minh deadline chung sẽ dừng fallback chậm và trả kết quả hiện có sớm."
+
+            def slow_primary(*_args, **_kwargs):
+                time.sleep(0.04)
+                return DiscoveryResult("tavily", True, True, ["primary"], 0, 0, "Primary finished.", [])
+
+            with (
+                patch.object(discovery, "_tavily", side_effect=slow_primary),
+                patch.object(discovery, "_exa") as exa,
+            ):
+                result = discovery.discover_and_index(text, organization_id=1)
+            self.assertEqual(result["provider"], "tavily")
+            exa.assert_not_called()
+
 
 class TextDisplayTest(unittest.TestCase):
     def test_repairs_reversible_utf8_mojibake_and_preserves_valid_vietnamese(self) -> None:
@@ -1076,7 +1115,7 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["queries"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["parallelWorkers"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["mode"], "fast")
-                self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 150.0)
+                self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 22.0)
                 self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 8)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMode"], "instant")
@@ -1084,7 +1123,7 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["linkupMaxQueries"], 1)
                 self.assertEqual(health["webDiscoveryLimits"]["linkupDepth"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
-                self.assertEqual(health["webDiscoveryLimits"]["enrichmentMaxSources"], 4)
+                self.assertEqual(health["webDiscoveryLimits"]["enrichmentMaxSources"], 2)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)
                 self.assertEqual(stats["sources"], 4)
