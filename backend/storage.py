@@ -4,9 +4,11 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from queue import Empty, LifoQueue
 from typing import Any, Iterator
 from urllib.parse import urlparse
 
@@ -1133,11 +1135,51 @@ class PostgresConnection:
 class PostgresStorage(Storage):
     backend_name = "postgresql"
     search_backend_name = "postgres-like"
+    connection_pool_size = 4
 
     def __init__(self, database_url: str):
         self.database_url = database_url
         self.search_mirror: Any | None = None
+        self._initialize_connection_pool()
         self.initialize()
+
+    def _initialize_connection_pool(self) -> None:
+        self._connection_pool: LifoQueue[Any] = LifoQueue(maxsize=self.connection_pool_size)
+        self._connection_pool_lock = threading.Lock()
+        self._connection_pool_created = 0
+
+    def _acquire_connection(self, psycopg_module: Any, row_factory: Any) -> Any:
+        try:
+            return self._connection_pool.get_nowait()
+        except Empty:
+            pass
+        with self._connection_pool_lock:
+            if self._connection_pool_created < self.connection_pool_size:
+                self._connection_pool_created += 1
+                create_connection = True
+            else:
+                create_connection = False
+        if create_connection:
+            try:
+                return psycopg_module.connect(self.database_url, row_factory=row_factory, connect_timeout=10)
+            except Exception:
+                with self._connection_pool_lock:
+                    self._connection_pool_created -= 1
+                raise
+        try:
+            return self._connection_pool.get(timeout=10)
+        except Empty as error:
+            raise RuntimeError("PostgreSQL connections are busy. Please try again shortly.") from error
+
+    def _release_connection(self, connection: Any, *, broken: bool = False) -> None:
+        if broken or bool(getattr(connection, "closed", False)):
+            try:
+                connection.close()
+            finally:
+                with self._connection_pool_lock:
+                    self._connection_pool_created -= 1
+            return
+        self._connection_pool.put(connection)
 
     @contextmanager
     def connect(self) -> Iterator[PostgresConnection]:
@@ -1146,15 +1188,19 @@ class PostgresStorage(Storage):
             from psycopg.rows import dict_row
         except ImportError as error:  # pragma: no cover - dependency is installed on Render
             raise RuntimeError("Thiếu thư viện psycopg để kết nối PostgreSQL.") from error
-        connection = psycopg.connect(self.database_url, row_factory=dict_row, connect_timeout=10)
+        connection = self._acquire_connection(psycopg, dict_row)
+        broken = False
         try:
             yield PostgresConnection(connection)
             connection.commit()
         except Exception:
-            connection.rollback()
+            try:
+                connection.rollback()
+            except Exception:
+                broken = True
             raise
         finally:
-            connection.close()
+            self._release_connection(connection, broken=broken)
 
     def initialize(self) -> None:
         statements = [

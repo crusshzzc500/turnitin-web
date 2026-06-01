@@ -14,7 +14,7 @@ import zipfile
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -30,7 +30,7 @@ from backend.extractors import extract_document
 from backend.jobs import AnalysisJobManager
 from backend.search import OpenSearchBackend
 from backend.server import create_server
-from backend.storage import Storage, utc_now
+from backend.storage import PostgresStorage, Storage, utc_now
 from backend.text import normalize_display_text, similarity
 from backend.web_discovery import (
     DiscoveryResult,
@@ -210,6 +210,49 @@ def settings_for(
         public_mode=public_mode,
         auth_mode=auth_mode,
     )
+
+
+class PostgresStorageTest(unittest.TestCase):
+    @staticmethod
+    def _modules(connection: Mock) -> dict[str, ModuleType]:
+        psycopg = ModuleType("psycopg")
+        rows = ModuleType("psycopg.rows")
+        psycopg.connect = Mock(return_value=connection)  # type: ignore[attr-defined]
+        rows.dict_row = object()  # type: ignore[attr-defined]
+        return {"psycopg": psycopg, "psycopg.rows": rows}
+
+    @staticmethod
+    def _storage() -> PostgresStorage:
+        storage = object.__new__(PostgresStorage)
+        storage.database_url = "postgresql://example.invalid/minh_chung"
+        storage.search_mirror = None
+        storage._initialize_connection_pool()
+        return storage
+
+    def test_reuses_healthy_connection(self) -> None:
+        connection = Mock(closed=False)
+        modules = self._modules(connection)
+        with patch.dict(sys.modules, modules):
+            storage = self._storage()
+            with storage.connect():
+                pass
+            with storage.connect():
+                pass
+        modules["psycopg"].connect.assert_called_once()  # type: ignore[attr-defined]
+        self.assertEqual(connection.commit.call_count, 2)
+        connection.close.assert_not_called()
+
+    def test_discards_connection_when_rollback_fails(self) -> None:
+        connection = Mock(closed=False)
+        connection.rollback.side_effect = RuntimeError("connection lost")
+        modules = self._modules(connection)
+        with patch.dict(sys.modules, modules):
+            storage = self._storage()
+            with self.assertRaisesRegex(ValueError, "bad transaction"):
+                with storage.connect():
+                    raise ValueError("bad transaction")
+        connection.close.assert_called_once()
+        self.assertEqual(storage._connection_pool_created, 0)
 
 
 class SimilarityAnalyzerTest(unittest.TestCase):
