@@ -266,6 +266,7 @@ class WebDiscovery:
                 organization_id,
                 self._remaining_result_limit(result_limit, result),
                 progress_callback,
+                initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
             result = primary if result is None else self._merge_results(result, primary)
         if (
@@ -357,10 +358,11 @@ class WebDiscovery:
         organization_id: int | None,
         max_results: int,
         progress_callback: DiscoveryProgressCallback | None = None,
+        initial_seen_urls: set[str] | None = None,
     ) -> DiscoveryResult:
         sources: list[dict[str, Any]] = []
         skipped = 0
-        seen_urls: set[str] = set()
+        seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
         timed_out = 0

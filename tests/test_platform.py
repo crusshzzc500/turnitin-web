@@ -672,7 +672,7 @@ class WebDiscoveryTest(unittest.TestCase):
             )
             calls: list[str] = []
             with (
-                patch.object(discovery, "_tavily", side_effect=lambda *args: (calls.append("tavily"), tavily)[1]),
+                patch.object(discovery, "_tavily", side_effect=lambda *args, **kwargs: (calls.append("tavily"), tavily)[1]) as tavily_search,
                 patch.object(discovery, "_exa", side_effect=lambda *args, **kwargs: (calls.append("exa"), exa)[1]),
                 patch.object(discovery, "_serper", side_effect=lambda *args, **kwargs: (calls.append("serper"), serper_result)[1]) as serper,
             ):
@@ -681,6 +681,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(result["provider"], "serper+tavily+exa")
             self.assertEqual(result["indexed"], 2)
             self.assertLessEqual(len(serper.call_args.args[0]), 1)
+            self.assertEqual(tavily_search.call_args.kwargs["initial_seen_urls"], {"https://example.org/serper"})
 
     def test_new_fallbacks_run_between_exa_and_serper_when_sources_are_still_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -713,7 +714,7 @@ class WebDiscoveryTest(unittest.TestCase):
                 )
 
             with (
-                patch.object(discovery, "_tavily", side_effect=lambda *args: (calls.append("tavily"), result("tavily", "https://example.org/tavily"))[1]),
+                patch.object(discovery, "_tavily", side_effect=lambda *args, **kwargs: (calls.append("tavily"), result("tavily", "https://example.org/tavily"))[1]),
                 patch.object(discovery, "_exa", side_effect=lambda *args, **kwargs: (calls.append("exa"), result("exa", "https://example.org/exa"))[1]),
                 patch.object(discovery, "_websearchapi", side_effect=lambda *args, **kwargs: (calls.append("websearchapi"), result("websearchapi", "https://example.org/websearchapi"))[1]) as websearch,
                 patch.object(discovery, "_linkup", side_effect=lambda *args, **kwargs: (calls.append("linkup"), result("linkup", "https://example.org/linkup"))[1]) as linkup,
