@@ -81,6 +81,11 @@ def _keyword_signature(value: str, frequencies: Counter[str], *, maximum: int = 
     return " ".join(ranked[:maximum])
 
 
+def _exact_phrase_query(value: str, *, maximum_words: int = 18) -> str:
+    words = re.findall(r"\w+", value, flags=re.UNICODE)[:maximum_words]
+    return f'"{" ".join(words)}"' if words else ""
+
+
 def build_queries(text: str, *, max_queries: int = 3) -> list[str]:
     document_tokens = _informative_tokens(text)
     frequencies = Counter(document_tokens)
@@ -102,7 +107,11 @@ def build_queries(text: str, *, max_queries: int = 3) -> list[str]:
         if len(excerpts) >= excerpt_budget:
             break
     if excerpts:
-        queries = list(excerpts)
+        queries = [
+            query
+            for excerpt in excerpts
+            if (query := _exact_phrase_query(excerpt))
+        ]
         signatures = [
             *(_keyword_signature(excerpt, frequencies) for excerpt in excerpts),
             _keyword_signature(text, frequencies, maximum=10),
@@ -770,7 +779,7 @@ class WebDiscovery:
         relevance = candidate_relevance(query, title, content)
         if relevance < 0.18:
             return None
-        content, enriched = self._enrich_content(canonical_url, content)
+        content, enriched = self._enrich_content(canonical_url, content, relevance=relevance)
         relevance = candidate_relevance(query, title, content)
         seen_urls.add(canonical_url)
         namespace = str(organization_id) if organization_id is not None else "public"
@@ -797,8 +806,8 @@ class WebDiscovery:
             "relevanceScore": round(relevance, 3),
         }
 
-    def _enrich_content(self, canonical_url: str, content: str) -> tuple[str, bool]:
-        if not self.crawler or count_words(content) >= 140 or not self._time_available(4.0):
+    def _enrich_content(self, canonical_url: str, content: str, *, relevance: float = 1.0) -> tuple[str, bool]:
+        if relevance < 0.72 or not self.crawler or count_words(content) >= 140 or not self._time_available(4.0):
             return content, False
         with self._enrichment_lock:
             if self._enrichment_remaining <= 0:

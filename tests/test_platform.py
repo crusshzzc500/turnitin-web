@@ -723,6 +723,16 @@ class WebDiscoveryTest(unittest.TestCase):
         self.assertEqual(len(queries), 2)
         self.assertTrue(all(len(query) <= 360 for query in queries))
 
+    def test_build_queries_prioritizes_quoted_exact_phrases(self) -> None:
+        text = (
+            "Lòng yêu nước là một trong những giá trị tinh thần cao quý của mỗi con người và là trách nhiệm đối với quê hương. "
+            "Mỗi công dân cần thể hiện tinh thần đó bằng hành động cụ thể trong học tập, lao động và bảo vệ môi trường. "
+            "Sự đoàn kết giúp cộng đồng vượt qua thử thách để cùng xây dựng đất nước ngày càng phát triển."
+        )
+        queries = build_queries(text, max_queries=3)
+        self.assertEqual(len(queries), 3)
+        self.assertTrue(all(query.startswith('"') and query.endswith('"') for query in queries))
+
     def test_build_queries_adds_diverse_keyword_fingerprints_without_extra_quota(self) -> None:
         text = (
             "Khung quản trị dữ liệu giáo dục cần minh bạch trách nhiệm giải trình và bảo vệ quyền riêng tư người học. "
@@ -963,6 +973,32 @@ class WebDiscoveryTest(unittest.TestCase):
                 result = discovery.discover_and_index(text, organization_id=1, max_results=10)
             self.assertEqual(result["indexed"], 10)
             self.assertEqual(storage.stats(1)["sources"], 10)
+
+    def test_low_relevance_source_does_not_consume_enrichment_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            settings = replace(
+                settings_for(root),
+                web_discovery_enrichment_max_sources=1,
+            )
+            discovery = WebDiscovery(settings, storage)
+            fetched: list[str] = []
+
+            class FakeCrawler:
+                url_policy = SimpleNamespace(validate=lambda url: url)
+                robots = SimpleNamespace(allowed=lambda _url: True)
+
+                @staticmethod
+                def _fetch(url):
+                    fetched.append(url)
+                    return SimpleNamespace(text="Nội dung đầy đủ từ trang nguồn chính có thêm nhiều từ để lập chỉ mục.")
+
+            discovery.attach_crawler(FakeCrawler())
+            discovery._enrichment_remaining = 1
+            discovery._enrich_content("https://example.org/noise", "Nội dung ngắn.", relevance=0.40)
+            discovery._enrich_content("https://example.org/original", "Nội dung ngắn.", relevance=0.90)
+            self.assertEqual(fetched, ["https://example.org/original"])
 
     def test_discovered_web_source_is_used_by_similarity_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
