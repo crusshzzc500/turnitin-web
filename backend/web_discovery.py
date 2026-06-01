@@ -226,11 +226,12 @@ class WebDiscovery:
             self.settings.exa_api_key
             and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._exa(
                 queries[: self.settings.web_discovery_exa_max_queries],
                 organization_id,
-                min(10, result_limit),
+                self._remaining_result_limit(result_limit, result),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
@@ -239,11 +240,12 @@ class WebDiscovery:
             self.settings.websearchapi_api_key
             and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._websearchapi(
                 queries[: self.settings.web_discovery_websearchapi_max_queries],
                 organization_id,
-                min(10, result_limit),
+                self._remaining_result_limit(result_limit, result),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
@@ -252,11 +254,12 @@ class WebDiscovery:
             self.settings.linkup_api_key
             and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._linkup(
                 queries[: self.settings.web_discovery_linkup_max_queries],
                 organization_id,
-                min(10, result_limit),
+                self._remaining_result_limit(result_limit, result),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
@@ -265,11 +268,12 @@ class WebDiscovery:
             self.settings.serper_api_key
             and self._time_available()
             and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._serper(
                 queries[: self.settings.web_discovery_serper_max_queries],
                 organization_id,
-                min(10, result_limit),
+                self._remaining_result_limit(result_limit, result),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
@@ -290,6 +294,10 @@ class WebDiscovery:
             "Chưa cấu hình Tavily, Exa, WebSearchAPI.ai, Linkup, Serper hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
             [],
         ).to_dict()
+
+    @staticmethod
+    def _remaining_result_limit(result_limit: int, result: DiscoveryResult | None) -> int:
+        return max(0, min(10, result_limit - (result.indexed if result else 0)))
 
     @staticmethod
     def _merge_results(primary: DiscoveryResult, fallback: DiscoveryResult) -> DiscoveryResult:
@@ -340,6 +348,8 @@ class WebDiscovery:
                         progress_callback(completed, len(queries), len(sources))
                     continue
                 for item in data.get("results", []):
+                    if len(sources) >= max_results or not self._time_available(0.25):
+                        break
                     indexed = self._index_candidate(
                         provider="tavily",
                         query=query,
@@ -401,6 +411,8 @@ class WebDiscovery:
                         progress_callback(completed, len(queries), len(sources))
                     continue
                 for item in (data.get("web") or {}).get("results", []):
+                    if len(sources) >= max_results or not self._time_available(0.25):
+                        break
                     indexed = self._index_candidate(
                         provider="brave",
                         query=query,
@@ -465,6 +477,8 @@ class WebDiscovery:
                         progress_callback(completed, len(queries), len(sources))
                     continue
                 for item in data.get("results", []):
+                    if len(sources) >= max_results or not self._time_available(0.25):
+                        break
                     indexed = self._index_candidate(
                         provider="exa",
                         query=query,
@@ -530,6 +544,8 @@ class WebDiscovery:
                         progress_callback(completed, len(queries), len(sources))
                     continue
                 for item in data.get("organic", []):
+                    if len(sources) >= max_results or not self._time_available(0.25):
+                        break
                     indexed = self._index_candidate(
                         provider="serper",
                         query=query,
@@ -586,6 +602,8 @@ class WebDiscovery:
                     progress_callback(completed, len(queries), len(sources))
                 continue
             for item in data.get("organic", []):
+                if len(sources) >= max_results or not self._time_available(0.25):
+                    break
                 indexed = self._index_candidate(
                     provider="websearchapi",
                     query=query,
@@ -634,6 +652,8 @@ class WebDiscovery:
                     progress_callback(completed, len(queries), len(sources))
                 continue
             for item in data.get("results", []):
+                if len(sources) >= max_results or not self._time_available(0.25):
+                    break
                 indexed = self._index_candidate(
                     provider="linkup",
                     query=query,

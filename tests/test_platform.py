@@ -881,6 +881,74 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(result["provider"], "tavily")
             self.assertEqual(updates[-1][:2], (3, 3))
 
+    def test_tavily_caps_indexed_sources_across_all_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            settings = replace(
+                settings_for(root, tavily_api_key="test-key"),
+                web_discovery_max_queries=3,
+                web_discovery_parallel_workers=3,
+            )
+            discovery = WebDiscovery(settings, storage)
+            text = (
+                "Đoạn thứ nhất có đủ số lượng từ riêng biệt để tạo truy vấn tìm kiếm công khai và kiểm tra giới hạn nguồn toàn báo cáo. "
+                "Đoạn thứ hai bổ sung thuật ngữ học thuật khác nhau để xác minh nhiều truy vấn không ghi quá nhiều nguồn vào dữ liệu. "
+                "Đoạn thứ ba tiếp tục cung cấp nội dung độc lập nhằm bảo đảm báo cáo được trả về nhanh sau khi tìm đủ nguồn phù hợp."
+            )
+            sequence = 0
+            lock = threading.Lock()
+
+            def fake_request(_url, payload, **_kwargs) -> dict:
+                nonlocal sequence
+                with lock:
+                    start = sequence
+                    sequence += 20
+                query = payload["query"]
+                return {
+                    "results": [
+                        {
+                            "url": f"https://example.org/source-{start + index}",
+                            "title": query,
+                            "content": f"{query} Nội dung bổ sung đủ dài để lập chỉ mục nguồn công khai phù hợp cho báo cáo kiểm tra.",
+                        }
+                        for index in range(20)
+                    ]
+                }
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                result = discovery.discover_and_index(text, organization_id=1, max_results=10)
+            self.assertEqual(result["indexed"], 10)
+            self.assertEqual(storage.stats(1)["sources"], 10)
+
+    def test_discovered_web_source_is_used_by_similarity_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, tavily_api_key="test-key"), storage)
+            text = (
+                "Minh bạch dữ liệu giáo dục giúp người học kiểm tra nguồn tài liệu và hiểu rõ trách nhiệm giải trình. "
+                "Quy trình đối chiếu công khai cần ghi nhận đúng đoạn văn đã xuất hiện trên trang nguồn."
+            )
+
+            def fake_request(_url, payload, **_kwargs) -> dict:
+                return {
+                    "results": [
+                        {
+                            "url": "https://example.org/copied-article",
+                            "title": "Minh bạch dữ liệu giáo dục",
+                            "content": text,
+                        }
+                    ]
+                }
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                discovered = discovery.discover_and_index(text, organization_id=1)
+            report = SimilarityAnalyzer(storage).analyze(text, organization_id=1)
+            self.assertEqual(discovered["indexed"], 1)
+            self.assertEqual(report["percent"], 100)
+            self.assertEqual(report["sources"][0]["url"], "https://example.org/copied-article")
+
     def test_tavily_returns_partial_results_after_time_budget(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
