@@ -1071,6 +1071,27 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(result["provider"], "tavily")
             self.assertEqual(updates[-1][:2], (3, 3))
 
+    def test_tavily_prefers_best_excerpt_before_deduplicating_url(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, tavily_api_key="test-key"), storage)
+            query = "academic integrity requires transparent citation records for every submitted research document"
+            weak = "academic integrity citation records with unrelated filler words for a public page search result"
+            strong = f"{query} and preserves the complete original public source content for comparison"
+            response = {
+                "results": [
+                    {"url": "https://example.org/shared", "title": "Weak excerpt", "content": weak},
+                    {"url": "https://example.org/shared", "title": "Strong excerpt", "content": strong},
+                ]
+            }
+            with patch.object(discovery, "_fetch_tavily", return_value=response):
+                result = discovery._tavily([query], organization_id=1, max_results=10)
+            with storage.connect() as connection:
+                row = connection.execute("SELECT text_content FROM sources").fetchone()
+            self.assertEqual(result.indexed, 1)
+            self.assertEqual(row["text_content"], strong)
+
     def test_tavily_caps_indexed_sources_across_all_queries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

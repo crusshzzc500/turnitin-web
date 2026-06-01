@@ -374,6 +374,7 @@ class WebDiscovery:
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
         timed_out = 0
+        candidates: list[tuple[float, str, dict[str, Any]]] = []
         executor = ThreadPoolExecutor(max_workers=max(1, workers))
         try:
             pending = {executor.submit(self._fetch_tavily, query, max_results): query for query in queries}
@@ -390,23 +391,9 @@ class WebDiscovery:
                         progress_callback(completed, len(queries), len(sources))
                     continue
                 for item in data.get("results", []):
-                    if len(sources) >= max_results or not self._time_available(0.25):
-                        break
-                    indexed = self._index_candidate(
-                        provider="tavily",
-                        query=query,
-                        canonical_url=str(item.get("url") or ""),
-                        title=str(item.get("title") or ""),
-                        content=str(item.get("content") or item.get("raw_content") or ""),
-                        organization_id=organization_id,
-                        minimum_words=12,
-                        seen_urls=seen_urls,
-                        comparison_text=comparison_text,
-                    )
-                    if indexed:
-                        sources.append(indexed)
-                    else:
-                        skipped += 1
+                    title = str(item.get("title") or "")
+                    content = str(item.get("content") or item.get("raw_content") or "")
+                    candidates.append((candidate_relevance(query, title, content), query, item))
                 if progress_callback:
                     progress_callback(completed, len(queries), len(sources))
         except FuturesTimeoutError:
@@ -415,6 +402,27 @@ class WebDiscovery:
             for future in pending:
                 future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
+        candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+        for _relevance, query, item in candidates:
+            if len(sources) >= max_results or not self._time_available(0.25):
+                break
+            indexed = self._index_candidate(
+                provider="tavily",
+                query=query,
+                canonical_url=str(item.get("url") or ""),
+                title=str(item.get("title") or ""),
+                content=str(item.get("content") or item.get("raw_content") or ""),
+                organization_id=organization_id,
+                minimum_words=12,
+                seen_urls=seen_urls,
+                comparison_text=comparison_text,
+            )
+            if indexed:
+                sources.append(indexed)
+            else:
+                skipped += 1
+        if progress_callback:
+            progress_callback(len(queries), len(queries), len(sources))
         message = (
             f"Đã tìm và lập chỉ mục {len(sources)} nguồn web công khai qua Tavily."
             if sources else "Tavily không trả về nguồn đủ nội dung để lập chỉ mục."
