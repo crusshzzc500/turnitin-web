@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 import zipfile
+from contextlib import contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -264,6 +265,22 @@ class PostgresStorageTest(unittest.TestCase):
             "INSERT INTO chunks(source_id, position) VALUES (%s, %s)",
             [(1, 0), (1, 1)],
         )
+
+    def test_postgres_search_uses_full_text_index_query(self) -> None:
+        storage = object.__new__(PostgresStorage)
+        connection = Mock()
+        connection.execute.return_value.fetchall.return_value = []
+
+        @contextmanager
+        def connect():
+            yield connection
+
+        storage.connect = connect
+        storage.search_chunks("Minh bạch dữ liệu giáo dục giúp đối chiếu nguồn tài liệu.", organization_id=1)
+        sql, params = connection.execute.call_args.args
+        self.assertIn("to_tsvector('simple', chunks.folded_text) @@ to_tsquery('simple', ?)", sql)
+        self.assertIn(" | ", params[0])
+        self.assertEqual(params[1:], (1, 100))
 
 
 class SimilarityAnalyzerTest(unittest.TestCase):
@@ -539,6 +556,34 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertEqual(captured["payload"], {"q": "academic integrity", "num": 10})
             self.assertEqual(captured["headers"]["X-API-KEY"], "serper-test-key")
             self.assertEqual(captured["timeout"], 7.0)
+
+    def test_serper_prioritizes_relevant_result_before_early_noise(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root, serper_api_key="serper"), storage)
+            query = '"lòng yêu nước là một trong những giá trị tinh thần cao quý của mỗi con người"'
+
+            def fake_request(*_args, **_kwargs) -> dict:
+                return {
+                    "organic": [
+                        {
+                            "link": "https://example.org/noise",
+                            "title": "Hình ảnh quê hương",
+                            "snippet": "Quê hương có sông suối núi đồi và nhiều phong cảnh thiên nhiên đẹp mắt.",
+                        },
+                        {
+                            "link": "https://example.org/original",
+                            "title": "Lòng yêu nước",
+                            "snippet": query,
+                        },
+                    ]
+                }
+
+            with patch.object(WebDiscovery, "_json_request", side_effect=fake_request):
+                result = discovery._serper([query], organization_id=1, max_results=1)
+            self.assertEqual(result.indexed, 1)
+            self.assertEqual(result.sources[0]["url"], "https://example.org/original")
 
     def test_serper_hard_caps_queries_even_if_called_with_more_than_one(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

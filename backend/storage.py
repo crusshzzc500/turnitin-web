@@ -1242,6 +1242,7 @@ class PostgresStorage(Storage):
                 token_count INTEGER NOT NULL
             )
             """,
+            "CREATE INDEX IF NOT EXISTS chunks_folded_fts_idx ON chunks USING GIN (to_tsvector('simple', folded_text))",
             """
             CREATE TABLE IF NOT EXISTS crawl_queue (
                 id BIGSERIAL PRIMARY KEY,
@@ -1373,26 +1374,21 @@ class PostgresStorage(Storage):
         terms = search_terms(text)[:10]
         if not terms:
             return []
-        conditions = " OR ".join("(chunks.normalized_text ILIKE ? OR chunks.folded_text ILIKE ?)" for _ in terms)
-        params: list[Any] = []
-        for term in terms:
-            wildcard = f"%{term}%"
-            params.extend([wildcard, wildcard])
-        params.extend([organization_id, limit])
+        query = " | ".join(fold_text(term) for term in terms)
         with self.connect() as connection:
             rows = connection.execute(
-                f"""
+                """
                 SELECT chunks.id, chunks.text_content, chunks.token_count,
                        sources.id AS source_id, COALESCE(sources.canonical_url, sources.url) AS url,
                        sources.title, sources.source_type, sources.organization_id
                 FROM chunks
                 JOIN sources ON sources.id = chunks.source_id
-                WHERE ({conditions})
+                WHERE to_tsvector('simple', chunks.folded_text) @@ to_tsquery('simple', ?)
                   AND (sources.organization_id IS NULL OR sources.organization_id = ?)
                 ORDER BY chunks.id DESC
                 LIMIT ?
                 """,
-                params,
+                (query, organization_id, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 

@@ -577,7 +577,15 @@ class WebDiscovery:
                     if progress_callback:
                         progress_callback(completed, len(queries), len(sources))
                     continue
-                for item in data.get("organic", []):
+                for item in sorted(
+                    data.get("organic", []),
+                    key=lambda candidate: candidate_relevance(
+                        query,
+                        str(candidate.get("title") or ""),
+                        str(candidate.get("snippet") or ""),
+                    ),
+                    reverse=True,
+                ):
                     if len(sources) >= max_results or not self._time_available(0.25):
                         break
                     indexed = self._index_candidate(
