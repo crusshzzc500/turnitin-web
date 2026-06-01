@@ -941,6 +941,38 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertIn("Nội dung đầy đủ", row["text_content"])
             self.assertTrue(json.loads(row["metadata_json"])["enrichedFromPublicPage"])
 
+    def test_precision_source_fetches_full_page_even_when_search_excerpt_is_long(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root), storage)
+            fetched: list[str] = []
+            submitted_text = "submitted exact phrase for the original public article"
+
+            class FakeCrawler:
+                url_policy = SimpleNamespace(validate=lambda url: url)
+                robots = SimpleNamespace(allowed=lambda _url: True)
+
+                @staticmethod
+                def _fetch(url):
+                    fetched.append(url)
+                    return SimpleNamespace(
+                        text=f"{'intro ' * 150}{submitted_text} {'complete-source-marker ' * 180}"
+                    )
+
+            discovery.attach_crawler(FakeCrawler())
+            discovery._enrichment_remaining = 1
+            content, enriched = discovery._enrich_content(
+                "https://example.org/original",
+                "search-excerpt " * 150,
+                relevance=0.95,
+                query=submitted_text,
+                comparison_text=submitted_text,
+            )
+            self.assertTrue(enriched)
+            self.assertEqual(fetched, ["https://example.org/original"])
+            self.assertIn("complete-source-marker", content)
+
     def test_tavily_results_are_namespaced_per_organization(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

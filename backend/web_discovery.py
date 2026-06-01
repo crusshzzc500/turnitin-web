@@ -253,8 +253,9 @@ class WebDiscovery:
             result = self._serper(
                 queries[: self.settings.web_discovery_serper_max_queries],
                 organization_id,
-                min(3, result_limit),
+                min(1, result_limit),
                 progress_callback,
+                comparison_text=text,
             )
         if (
             self.settings.tavily_api_key
@@ -554,6 +555,7 @@ class WebDiscovery:
         max_results: int,
         progress_callback: DiscoveryProgressCallback | None = None,
         initial_seen_urls: set[str] | None = None,
+        comparison_text: str = "",
     ) -> DiscoveryResult:
         queries = queries[:1]
         sources: list[dict[str, Any]] = []
@@ -597,6 +599,7 @@ class WebDiscovery:
                         organization_id=organization_id,
                         minimum_words=8,
                         seen_urls=seen_urls,
+                        comparison_text=comparison_text,
                     )
                     if indexed:
                         sources.append(indexed)
@@ -801,6 +804,7 @@ class WebDiscovery:
         organization_id: int | None,
         minimum_words: int,
         seen_urls: set[str],
+        comparison_text: str = "",
     ) -> dict[str, Any] | None:
         canonical_url = normalize_candidate_url(canonical_url)
         if not canonical_url or canonical_url in seen_urls:
@@ -812,7 +816,13 @@ class WebDiscovery:
         relevance = candidate_relevance(query, title, content)
         if relevance < 0.18:
             return None
-        content, enriched = self._enrich_content(canonical_url, content, relevance=relevance, query=query)
+        content, enriched = self._enrich_content(
+            canonical_url,
+            content,
+            relevance=relevance,
+            query=query,
+            comparison_text=comparison_text,
+        )
         relevance = candidate_relevance(query, title, content)
         seen_urls.add(canonical_url)
         namespace = str(organization_id) if organization_id is not None else "public"
@@ -846,8 +856,10 @@ class WebDiscovery:
         *,
         relevance: float = 1.0,
         query: str = "",
+        comparison_text: str = "",
     ) -> tuple[str, bool]:
-        if relevance < 0.72 or not self.crawler or count_words(content) >= 140 or not self._time_available(4.0):
+        content_is_sufficient = count_words(content) >= 140 and not comparison_text
+        if relevance < 0.72 or not self.crawler or content_is_sufficient or not self._time_available(4.0):
             return content, False
         with self._enrichment_lock:
             if self._enrichment_remaining <= 0:
@@ -855,7 +867,7 @@ class WebDiscovery:
             self._enrichment_remaining -= 1
         executor = ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(self._fetch_enriched_content, canonical_url, [query, content])
+            future = executor.submit(self._fetch_enriched_content, canonical_url, [comparison_text, query, content])
             enriched = future.result(timeout=min(3.0, max(0.5, self._time_remaining() - 1.0)))
             if count_words(enriched) > count_words(content):
                 return enriched, True
