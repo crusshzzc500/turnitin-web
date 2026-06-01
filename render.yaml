@@ -44,6 +44,8 @@ services:
         value: "fast"
       - key: MINH_CHUNG_WEB_DISCOVERY_SERPER_MAX_QUERIES
         value: "1"
+      - key: MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES
+        value: "4"
       - key: TAVILY_API_KEY
         sync: false
       - key: EXA_API_KEY

@@ -133,11 +133,17 @@ def search_terms(value: str, maximum: int = 12) -> list[str]:
     return terms[:maximum]
 
 
+def _token_shingles(tokens: list[str], size: int = 3) -> set[tuple[str, ...]]:
+    return {tuple(tokens[index : index + size]) for index in range(len(tokens) - size + 1)}
+
+
 def similarity(left: str, right: str) -> float:
     left_tokens = tokenize(left)
     right_tokens = tokenize(right)
     if not left_tokens or not right_tokens:
         return 0.0
+    if left_tokens == right_tokens:
+        return 1.0
 
     left_set = set(left_tokens)
     right_set = set(right_tokens)
@@ -146,8 +152,19 @@ def similarity(left: str, right: str) -> float:
     jaccard = shared / union if union else 0.0
     containment = shared / min(len(left_set), len(right_set))
     sequence = SequenceMatcher(None, fold_text(left), fold_text(right)).ratio()
+    token_match = SequenceMatcher(None, left_tokens, right_tokens).find_longest_match()
+    ordered_span = token_match.size / min(len(left_tokens), len(right_tokens))
+    left_shingles = _token_shingles(left_tokens)
+    right_shingles = _token_shingles(right_tokens)
+    shingle_containment = (
+        len(left_shingles & right_shingles) / min(len(left_shingles), len(right_shingles))
+        if left_shingles and right_shingles
+        else 0.0
+    )
+    weighted_jaccard = jaccard * (0.75 + min(1.0, ordered_span * 2) * 0.25)
+    weighted_containment = containment * (0.70 + min(1.0, ordered_span * 2) * 0.30)
 
-    return max(jaccard, containment * 0.92, sequence * 0.94)
+    return max(weighted_jaccard, weighted_containment * 0.92, sequence * 0.94, shingle_containment * 0.98)
 
 
 def is_bibliography_heading(value: str) -> bool:

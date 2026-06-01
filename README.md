@@ -63,12 +63,17 @@ Danh sách API hiện có nằm trong [API.md](./API.md).
 ## Tìm thêm nguồn web khi tạo báo cáo
 
 Tùy chọn **Quét thêm nguồn web công khai** mặc định tắt. Khi người dùng chủ động bật, hệ thống
-chọn tối đa `10` đoạn trích nổi bật và gửi truy vấn song song sang Tavily. Khi Tavily trả về ít hơn
+chọn thông minh tối đa `10` dấu vân tay nội dung và gửi truy vấn song song sang Tavily. Bộ chọn ưu tiên
+câu có nhiều thuật ngữ hiếm, cắt câu dài thành cửa sổ có thể tìm kiếm, tránh truy vấn gần trùng và dành
+một phần ngân sách sẵn có cho chữ ký từ khóa cô đọng để bắt cả nội dung đã sửa nhẹ câu chữ. Khi Tavily trả về ít hơn
 `8` nguồn hữu ích hoặc không dùng được, Exa fallback chỉ nhận tối đa `3` truy vấn để tiết kiệm quota.
 Nếu tổng nguồn vẫn thiếu, WebSearchAPI.ai và Linkup lần lượt chỉ nhận tối đa `1` truy vấn, sau đó Serper
 fallback chỉ nhận tối đa `1` truy vấn. Brave là lựa chọn dự phòng tiếp theo khi không có các key trên. Mỗi truy vấn
 nhận tối đa `10` kết quả ứng viên, sau đó hệ thống lập chỉ mục nguồn phù hợp trong phạm vi tổ chức
-rồi mới chạy đối chiếu. Không gửi toàn bộ tài liệu và không trả API key về trình duyệt.
+rồi mới chạy đối chiếu. URL tracking được chuẩn hóa để tránh nguồn trùng; kết quả ít liên quan bị loại
+bằng điểm phủ từ khóa và cụm từ liên tiếp. Với tối đa `4` ứng viên tốt có đoạn mô tả ngắn, hệ thống tải
+trang công khai theo `robots.txt` để bổ sung nội dung đầy đủ hơn mà không tốn thêm credit API.
+Không gửi toàn bộ tài liệu và không trả API key về trình duyệt.
 
 Nguồn tìm được lưu bằng khóa nội bộ theo tổ chức, nên hai trường cùng tìm thấy một URL không ghi
 đè dữ liệu của nhau. Cấu hình một trong hai biến môi trường:
@@ -98,6 +103,7 @@ Có thể điều chỉnh giới hạn bằng
 `MINH_CHUNG_WEB_DISCOVERY_WEBSEARCHAPI_MAX_QUERIES`, `MINH_CHUNG_WEB_DISCOVERY_LINKUP_MAX_QUERIES` và
 `MINH_CHUNG_WEB_DISCOVERY_LINKUP_DEPTH`. Giới hạn Serper dùng
 `MINH_CHUNG_WEB_DISCOVERY_SERPER_MAX_QUERIES` và luôn bị chặn ở tối đa `1`.
+Giới hạn tải bổ sung trang nguồn công khai dùng `MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES`.
 
 ## Chế độ demo công khai
 

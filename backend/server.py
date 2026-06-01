@@ -58,6 +58,8 @@ class AppContext:
             storage.attach_search_mirror(search_backend)
         seed_demo_sources(storage)
         crawler = Crawler(storage, settings)
+        web_discovery = WebDiscovery(settings, storage)
+        web_discovery.attach_crawler(crawler)
         return cls(
             settings=settings,
             storage=storage,
@@ -65,7 +67,7 @@ class AppContext:
             crawler=crawler,
             crawl_runner=CrawlRunner(crawler),
             search_backend=search_backend,
-            web_discovery=WebDiscovery(settings, storage),
+            web_discovery=web_discovery,
             analysis_jobs=AnalysisJobManager(
                 max_workers=settings.analysis_job_workers,
                 ttl_seconds=settings.analysis_job_ttl_seconds,
@@ -161,6 +163,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                     "databaseBackend": self.context.storage.backend_name,
                     "searchBackend": self.context.search_backend.name,
                     "webDiscovery": self.context.web_discovery.status(),
+                    "webDiscoveryStrategy": "adaptive-fingerprint-v2",
                     "publicMode": self.context.settings.public_mode,
                     "authRequired": self.context.settings.auth_mode == "password",
                     "documentMaxBytes": self.context.settings.document_max_bytes,
@@ -177,6 +180,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "linkupMaxQueries": self.context.settings.web_discovery_linkup_max_queries,
                         "linkupDepth": self.context.settings.web_discovery_linkup_depth,
                         "serperMaxQueries": self.context.settings.web_discovery_serper_max_queries,
+                        "enrichmentMaxSources": self.context.settings.web_discovery_enrichment_max_sources,
                     },
                 }
             )

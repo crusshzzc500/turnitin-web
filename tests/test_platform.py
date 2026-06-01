@@ -14,6 +14,7 @@ import zipfile
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -30,8 +31,14 @@ from backend.jobs import AnalysisJobManager
 from backend.search import OpenSearchBackend
 from backend.server import create_server
 from backend.storage import Storage, utc_now
-from backend.text import normalize_display_text
-from backend.web_discovery import DiscoveryResult, WebDiscovery, build_queries
+from backend.text import normalize_display_text, similarity
+from backend.web_discovery import (
+    DiscoveryResult,
+    WebDiscovery,
+    build_queries,
+    candidate_relevance,
+    normalize_candidate_url,
+)
 
 
 class LocalSiteHandler(BaseHTTPRequestHandler):
@@ -657,6 +664,131 @@ class WebDiscoveryTest(unittest.TestCase):
         self.assertEqual(len(queries), 2)
         self.assertTrue(all(len(query) <= 360 for query in queries))
 
+    def test_build_queries_adds_diverse_keyword_fingerprints_without_extra_quota(self) -> None:
+        text = (
+            "Khung quản trị dữ liệu giáo dục cần minh bạch trách nhiệm giải trình và bảo vệ quyền riêng tư người học. "
+            "Khung quản trị dữ liệu giáo dục cần minh bạch trách nhiệm giải trình và bảo vệ quyền riêng tư người học trong trường học. "
+            "Mô hình kiểm định độc lập bổ sung truy vết nguồn tài liệu cùng bằng chứng học thuật có thể xác minh. "
+            "Quy trình rà soát cuối cùng phân loại trích dẫn hợp lệ và nội dung cần bổ sung nguồn tham khảo."
+        )
+        queries = build_queries(text, max_queries=4)
+        self.assertEqual(len(queries), 4)
+        self.assertTrue(any(len(query.split()) < 10 for query in queries))
+        self.assertLess(
+            sum("Khung quản trị dữ liệu giáo dục" in query for query in queries),
+            2,
+        )
+
+    def test_build_queries_splits_long_sentences_into_searchable_windows(self) -> None:
+        text = " ".join(f"thuậtngữ{index}" for index in range(52)) + "."
+        queries = build_queries(text, max_queries=3)
+        self.assertGreaterEqual(len(queries), 2)
+        self.assertTrue(all(10 <= len(query.split()) <= 32 for query in queries))
+
+    def test_candidate_relevance_rewards_phrase_overlap_and_rejects_noise(self) -> None:
+        query = "quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình"
+        relevant = candidate_relevance(
+            query,
+            "Quản trị dữ liệu giáo dục",
+            "Khung quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình giúp bảo vệ người học.",
+        )
+        unrelated = candidate_relevance(
+            query,
+            "Bản tin thể thao",
+            "Lịch thi đấu mới nhất được cập nhật sau vòng chung kết cuối tuần.",
+        )
+        self.assertGreater(relevant, 0.8)
+        self.assertEqual(unrelated, 0.0)
+
+    def test_tracking_urls_are_normalized_before_indexing(self) -> None:
+        self.assertEqual(
+            normalize_candidate_url("HTTPS://Example.org/article/?utm_source=test&fbclid=123#section"),
+            "https://example.org/article",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root), storage)
+            seen_urls: set[str] = set()
+            content = (
+                "Khung quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình giúp bảo vệ quyền riêng tư "
+                "và nâng cao khả năng truy vết nguồn tài liệu trong môi trường học thuật."
+            )
+            first = discovery._index_candidate(
+                provider="test",
+                query="quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình",
+                canonical_url="https://example.org/article?utm_source=first",
+                title="Khung quản trị dữ liệu giáo dục",
+                content=content,
+                organization_id=1,
+                minimum_words=8,
+                seen_urls=seen_urls,
+            )
+            duplicate = discovery._index_candidate(
+                provider="test",
+                query="quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình",
+                canonical_url="https://EXAMPLE.org/article/?fbclid=second",
+                title="Bản sao tracking",
+                content=content,
+                organization_id=1,
+                minimum_words=8,
+                seen_urls=seen_urls,
+            )
+            noise = discovery._index_candidate(
+                provider="test",
+                query="quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình",
+                canonical_url="https://example.org/unrelated",
+                title="Bản tin thể thao",
+                content="Lịch thi đấu mới nhất được cập nhật sau vòng chung kết cuối tuần với nhiều thay đổi đáng chú ý.",
+                organization_id=1,
+                minimum_words=8,
+                seen_urls=seen_urls,
+            )
+            self.assertTrue(first)
+            self.assertIsNone(duplicate)
+            self.assertIsNone(noise)
+            self.assertEqual(storage.stats(1)["sources"], 1)
+
+    def test_short_search_snippet_is_enriched_from_allowed_public_page(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(settings_for(root), storage)
+
+            class FakeCrawler:
+                url_policy = SimpleNamespace(validate=lambda url: url)
+                robots = SimpleNamespace(allowed=lambda _url: True)
+
+                @staticmethod
+                def _fetch(_url):
+                    return SimpleNamespace(
+                        text=(
+                            "Khung quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình giúp bảo vệ quyền riêng tư "
+                            "người học trong môi trường học thuật. Nội dung đầy đủ bổ sung bằng chứng truy vết nguồn tài liệu "
+                            "và giải thích rõ quy trình kiểm định độc lập cho từng báo cáo nghiên cứu."
+                        )
+                    )
+
+            discovery.attach_crawler(FakeCrawler())
+            discovery._enrichment_remaining = 1
+            indexed = discovery._index_candidate(
+                provider="test",
+                query="quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình",
+                canonical_url="https://example.org/full-article",
+                title="Quản trị dữ liệu giáo dục",
+                content="Quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình bảo vệ người học.",
+                organization_id=1,
+                minimum_words=8,
+                seen_urls=set(),
+            )
+            with storage.connect() as connection:
+                row = connection.execute(
+                    "SELECT text_content, metadata_json FROM sources WHERE id = ?",
+                    (indexed["id"],),
+                ).fetchone()
+            self.assertIn("Nội dung đầy đủ", row["text_content"])
+            self.assertTrue(json.loads(row["metadata_json"])["enrichedFromPublicPage"])
+
     def test_tavily_results_are_namespaced_per_organization(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -765,6 +897,18 @@ class TextDisplayTest(unittest.TestCase):
     def test_repairs_reversible_utf8_mojibake_and_preserves_valid_vietnamese(self) -> None:
         self.assertEqual(normalize_display_text("LiÃªm chÃ­nh há»c thuáº­t"), "Liêm chính học thuật")
         self.assertEqual(normalize_display_text("Liêm chính học thuật"), "Liêm chính học thuật")
+
+    def test_similarity_rewards_ordered_phrases_over_scrambled_keywords(self) -> None:
+        source = "quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình bảo vệ quyền riêng tư người học"
+        copied_with_extra = (
+            "nghiên cứu cho thấy quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình "
+            "bảo vệ quyền riêng tư người học trong trường học hiện đại"
+        )
+        scrambled = (
+            "người học dữ liệu riêng tư trách nhiệm giáo dục bảo vệ giải trình minh bạch quản trị quyền"
+        )
+        self.assertGreater(similarity(source, copied_with_extra), 0.85)
+        self.assertGreater(similarity(source, copied_with_extra), similarity(source, scrambled))
 
 
 class ResponseWriterTest(unittest.TestCase):
@@ -940,6 +1084,7 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["linkupMaxQueries"], 1)
                 self.assertEqual(health["webDiscoveryLimits"]["linkupDepth"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["serperMaxQueries"], 1)
+                self.assertEqual(health["webDiscoveryLimits"]["enrichmentMaxSources"], 4)
                 self.assertEqual(search_status["backend"], "sqlite-fts5")
                 self.assertEqual(reindex["chunks"], 20)
                 self.assertEqual(stats["sources"], 4)

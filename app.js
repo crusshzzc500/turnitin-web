@@ -337,7 +337,7 @@ function applySessionUI() {
   const providers = state.health?.webDiscovery || {};
   const discoveryMessage = state.report?.webDiscovery?.message || (
     providers.tavily || providers.exa || providers.websearchapi || providers.linkup || providers.serper || providers.brave
-      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống quét nhanh tối đa ${maxQueries} đoạn trích và dừng chờ nguồn chậm sau ${timeBudget} giây.`
+      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống chọn thông minh tối đa ${maxQueries} dấu vân tay nội dung, loại nguồn trùng và dừng chờ nguồn chậm sau ${timeBudget} giây.`
       : "Chưa cấu hình nhà cung cấp quét web. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
   );
   elements.webDiscoveryHint.textContent = publicMode

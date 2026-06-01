@@ -47,6 +47,7 @@ class Settings:
     web_discovery_linkup_max_queries: int = 1
     web_discovery_linkup_depth: str = "fast"
     web_discovery_serper_max_queries: int = 1
+    web_discovery_enrichment_max_sources: int = 4
     analysis_job_workers: int = 4
     analysis_job_ttl_seconds: int = 900
     public_mode: bool = False
@@ -145,6 +146,10 @@ class Settings:
             web_discovery_serper_max_queries=min(
                 1,
                 max(1, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_SERPER_MAX_QUERIES", "1"))),
+            ),
+            web_discovery_enrichment_max_sources=max(
+                0,
+                min(8, int(os.getenv("MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES", "4"))),
             ),
             analysis_job_workers=max(1, min(16, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_WORKERS", "4")))),
             analysis_job_ttl_seconds=max(60, int(os.getenv("MINH_CHUNG_ANALYSIS_JOB_TTL_SECONDS", "900"))),

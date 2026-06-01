@@ -3,20 +3,23 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
-from .text import count_words, normalize_display_text, split_sentences
+from .text import count_words, normalize_display_text, split_sentences, tokenize
 
 
 STOPWORDS = {
     "và", "của", "là", "các", "một", "những", "trong", "cho", "được", "với", "khi",
     "này", "đó", "để", "từ", "the", "and", "that", "this", "with", "from", "are",
-    "was", "were", "have",
+    "was", "were", "have", "có", "đã", "đang", "không", "như", "theo", "về", "sẽ",
 }
+TRACKING_QUERY_PARAMETERS = {"fbclid", "gclid", "mc_cid", "mc_eid"}
 DiscoveryProgressCallback = Callable[[int, int, int], None]
 
 
@@ -40,39 +43,150 @@ class DiscoveryResult:
             "indexed": self.indexed,
             "skipped": self.skipped,
             "message": self.message,
-            "sources": self.sources,
+            "queryStrategy": "adaptive-fingerprint-v2",
+            "sources": sorted(self.sources, key=lambda item: item.get("relevanceScore", 0), reverse=True),
         }
 
 
+def _informative_tokens(value: str) -> list[str]:
+    return [token for token in tokenize(value) if len(token) >= 3 and token not in STOPWORDS]
+
+
+def _candidate_windows(sentence: str) -> list[str]:
+    words = re.findall(r"[\wÀ-ỹ]+", sentence, flags=re.UNICODE)
+    if len(words) <= 32:
+        return [sentence]
+    windows = []
+    for start in range(0, len(words), 16):
+        window = words[start : start + 28]
+        if len(window) >= 12:
+            windows.append(" ".join(window))
+        if start + 28 >= len(words):
+            break
+    return windows
+
+
+def _query_overlap(left: str, right: str) -> float:
+    left_tokens = set(_informative_tokens(left))
+    right_tokens = set(_informative_tokens(right))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens))
+
+
+def _keyword_signature(value: str, frequencies: Counter[str], *, maximum: int = 8) -> str:
+    tokens = set(_informative_tokens(value))
+    ranked = sorted(tokens, key=lambda token: (frequencies[token], -len(token), token))
+    return " ".join(ranked[:maximum])
+
+
 def build_queries(text: str, *, max_queries: int = 3) -> list[str]:
-    candidates: list[tuple[int, str]] = []
+    document_tokens = _informative_tokens(text)
+    frequencies = Counter(document_tokens)
+    candidates: list[tuple[float, str]] = []
     for sentence in split_sentences(text):
         clean = re.sub(r"\s+", " ", sentence).strip(" \t\n\r\"'“”‘’.:,;()[]{}")
-        words = re.findall(r"[\wÀ-ỹ]+", clean, flags=re.UNICODE)
-        if 10 <= len(words) <= 32:
-            distinct = len({word.lower() for word in words if word.lower() not in STOPWORDS})
-            candidates.append((distinct, clean[:360]))
+        for window in _candidate_windows(clean):
+            words = tokenize(window)
+            informative = set(_informative_tokens(window))
+            if 10 <= len(words) <= 32 and len(informative) >= 5:
+                rarity = sum(1 / max(1, frequencies[token]) for token in informative)
+                candidates.append((len(informative) * 2 + rarity + min(len(words), 28) / 10, window[:360]))
     candidates.sort(reverse=True, key=lambda item: (item[0], len(item[1])))
-    queries: list[str] = []
+    excerpt_budget = max_queries if max_queries <= 3 else max(2, round(max_queries * 0.7))
+    excerpts: list[str] = []
     for _score, sentence in candidates:
-        if sentence not in queries:
-            queries.append(sentence)
-        if len(queries) >= max_queries:
+        if sentence not in excerpts and all(_query_overlap(sentence, existing) < 0.72 for existing in excerpts):
+            excerpts.append(sentence)
+        if len(excerpts) >= excerpt_budget:
             break
-    if queries:
-        return queries
-    tokens = [
-        token.lower()
-        for token in re.findall(r"[\wÀ-ỹ]+", text, flags=re.UNICODE)
-        if token.lower() not in STOPWORDS
+    if excerpts:
+        queries = list(excerpts)
+        signatures = [
+            *(_keyword_signature(excerpt, frequencies) for excerpt in excerpts),
+            _keyword_signature(text, frequencies, maximum=10),
+        ]
+        added_signatures: list[str] = []
+        for signature in signatures:
+            if (
+                signature
+                and signature not in queries
+                and all(_query_overlap(signature, existing) < 0.80 for existing in added_signatures)
+            ):
+                queries.append(signature)
+                added_signatures.append(signature)
+            if len(queries) >= max_queries:
+                break
+        for _score, sentence in candidates:
+            if sentence not in queries and all(_query_overlap(sentence, existing) < 0.78 for existing in queries):
+                queries.append(sentence)
+            if len(queries) >= max_queries:
+                break
+        return queries[:max_queries]
+    fallback_tokens = sorted(set(document_tokens), key=lambda token: (frequencies[token], -len(token), token))
+    return [" ".join(fallback_tokens[:14])] if fallback_tokens else []
+
+
+def normalize_candidate_url(value: str) -> str:
+    parsed = urlparse(value.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in TRACKING_QUERY_PARAMETERS
     ]
-    return [" ".join(tokens[:14])] if tokens else []
+    path = parsed.path.rstrip("/") or "/"
+    return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, "", urlencode(query), ""))
+
+
+def _longest_shared_phrase(left: list[str], right: list[str]) -> int:
+    if not left or not right:
+        return 0
+    previous = [0] * (len(right) + 1)
+    longest = 0
+    for left_token in left:
+        current = [0]
+        for index, right_token in enumerate(right, start=1):
+            matched = previous[index - 1] + 1 if left_token == right_token else 0
+            current.append(matched)
+            longest = max(longest, matched)
+        previous = current
+    return longest
+
+
+def candidate_relevance(query: str, title: str, content: str) -> float:
+    ordered_query_tokens = _informative_tokens(query)
+    ordered_content_tokens = _informative_tokens(content)
+    query_tokens = set(ordered_query_tokens)
+    if not query_tokens:
+        return 0.0
+    title_tokens = set(_informative_tokens(title))
+    content_tokens = set(ordered_content_tokens)
+    title_overlap = len(query_tokens & title_tokens) / len(query_tokens)
+    content_overlap = len(query_tokens & content_tokens) / len(query_tokens)
+    shared = len(query_tokens & (title_tokens | content_tokens))
+    if shared < 2:
+        return 0.0
+    phrase_length = _longest_shared_phrase(ordered_query_tokens, ordered_content_tokens)
+    phrase_signal = min(1.0, phrase_length / 6)
+    return min(1.0, content_overlap * 0.65 + title_overlap * 0.20 + phrase_signal * 0.35)
+
+
+def _normalized_url_set(urls: set[str] | None = None) -> set[str]:
+    return {normalized for url in urls or set() if (normalized := normalize_candidate_url(url))}
 
 
 class WebDiscovery:
     def __init__(self, settings: Any, storage: Any):
         self.settings = settings
         self.storage = storage
+        self.crawler: Any | None = None
+        self._enrichment_lock = threading.Lock()
+        self._enrichment_remaining = 0
+
+    def attach_crawler(self, crawler: Any) -> None:
+        self.crawler = crawler
 
     def status(self) -> dict[str, bool]:
         return {
@@ -92,6 +206,8 @@ class WebDiscovery:
         max_results: int | None = None,
         progress_callback: DiscoveryProgressCallback | None = None,
     ) -> dict[str, Any]:
+        with self._enrichment_lock:
+            self._enrichment_remaining = self.settings.web_discovery_enrichment_max_sources
         queries = build_queries(text, max_queries=self.settings.web_discovery_max_queries)
         if not queries:
             return DiscoveryResult(
@@ -173,9 +289,10 @@ class WebDiscovery:
         sources: list[dict[str, Any]] = []
         seen_urls: set[str] = set()
         for source in [*primary.sources, *fallback.sources]:
-            if source["url"] not in seen_urls:
+            canonical_url = normalize_candidate_url(source["url"])
+            if canonical_url and canonical_url not in seen_urls:
                 sources.append(source)
-                seen_urls.add(source["url"])
+                seen_urls.add(canonical_url)
         return DiscoveryResult(
             provider=f"{primary.provider}+{fallback.provider}",
             enabled=True,
@@ -321,7 +438,7 @@ class WebDiscovery:
     ) -> DiscoveryResult:
         sources: list[dict[str, Any]] = []
         skipped = 0
-        seen_urls = set(initial_seen_urls or ())
+        seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
         timed_out = 0
@@ -386,7 +503,7 @@ class WebDiscovery:
         queries = queries[:1]
         sources: list[dict[str, Any]] = []
         skipped = 0
-        seen_urls = set(initial_seen_urls or ())
+        seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
         timed_out = 0
@@ -449,7 +566,7 @@ class WebDiscovery:
         queries = queries[:1]
         sources: list[dict[str, Any]] = []
         skipped = 0
-        seen_urls = set(initial_seen_urls or ())
+        seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         for completed, query in enumerate(queries, start=1):
             try:
@@ -495,7 +612,7 @@ class WebDiscovery:
         queries = queries[:1]
         sources: list[dict[str, Any]] = []
         skipped = 0
-        seen_urls = set(initial_seen_urls or ())
+        seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         for completed, query in enumerate(queries, start=1):
             try:
@@ -612,15 +729,19 @@ class WebDiscovery:
         minimum_words: int,
         seen_urls: set[str],
     ) -> dict[str, Any] | None:
-        canonical_url = canonical_url.strip()
-        parsed = urlparse(canonical_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or canonical_url in seen_urls:
+        canonical_url = normalize_candidate_url(canonical_url)
+        if not canonical_url or canonical_url in seen_urls:
             return None
-        seen_urls.add(canonical_url)
         title = normalize_display_text(title)
         content = normalize_display_text(content).strip()[: self.settings.web_discovery_max_content_chars]
         if count_words(content) < minimum_words:
             return None
+        relevance = candidate_relevance(query, title, content)
+        if relevance < 0.18:
+            return None
+        content, enriched = self._enrich_content(canonical_url, content)
+        relevance = candidate_relevance(query, title, content)
+        seen_urls.add(canonical_url)
         namespace = str(organization_id) if organization_id is not None else "public"
         digest = hashlib.sha256(f"{namespace}:{canonical_url}".encode("utf-8")).hexdigest()[:32]
         source_id = self.storage.upsert_source(
@@ -629,10 +750,40 @@ class WebDiscovery:
             title=(title.strip() or canonical_url)[:220],
             text_content=content,
             source_type=f"web-{provider}",
-            metadata={"provider": provider, "query": query, "canonicalUrl": canonical_url},
+            metadata={
+                "provider": provider,
+                "query": query,
+                "canonicalUrl": canonical_url,
+                "relevanceScore": round(relevance, 3),
+                "enrichedFromPublicPage": enriched,
+            },
             organization_id=organization_id,
         )
-        return {"id": source_id, "title": (title.strip() or canonical_url)[:220], "url": canonical_url}
+        return {
+            "id": source_id,
+            "title": (title.strip() or canonical_url)[:220],
+            "url": canonical_url,
+            "relevanceScore": round(relevance, 3),
+        }
+
+    def _enrich_content(self, canonical_url: str, content: str) -> tuple[str, bool]:
+        if not self.crawler or count_words(content) >= 140:
+            return content, False
+        with self._enrichment_lock:
+            if self._enrichment_remaining <= 0:
+                return content, False
+            self._enrichment_remaining -= 1
+        try:
+            normalized = self.crawler.url_policy.validate(canonical_url)
+            if not self.crawler.robots.allowed(normalized):
+                return content, False
+            result = self.crawler._fetch(normalized)
+            enriched = normalize_display_text(result.text).strip()[: self.settings.web_discovery_max_content_chars]
+            if count_words(enriched) > count_words(content):
+                return enriched, True
+        except Exception:
+            return content, False
+        return content, False
 
     @staticmethod
     def _json_request(
