@@ -66,6 +66,7 @@ Ví dụ phân tích:
   "saveReport": true,
   "indexForComparison": false,
   "enableWebSearch": false,
+  "deepWebSearch": false,
   "webSearchMaxResults": 5,
   "settings": {
     "excludeQuotes": true,
@@ -91,7 +92,7 @@ Tính năng này không gọi Turnitin nếu chưa có tích hợp API chính th
 Hai lượt quét của trợ lý dùng chế độ xác minh sâu: dừng sớm nếu đã thấy bản sao toàn bài; nếu chưa,
 hệ thống hỏi thêm từng nhà cung cấp web công khai đã cấu hình với giới hạn nhỏ cho mỗi bên. Mỗi lượt rà
 có ngân sách tối đa mặc định `55` giây và có thể dùng thêm quota miễn phí so với báo cáo thông thường.
-Bộ chọn `whole-document-fingerprint-v3` bảo đảm lấy dấu vân tay xuyên suốt phần đầu, giữa và cuối tài liệu dài.
+Bộ chọn `whole-document-fingerprint-v4` bảo đảm lấy dấu vân tay xuyên suốt phần đầu, giữa và cuối tài liệu dài.
 
 `indexForComparison` mặc định là `false`. Chỉ đặt thành `true` sau khi người nộp
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.
@@ -105,6 +106,12 @@ kết quả ứng viên. Tavily mặc định dùng `fast`, chỉ lấy đoạn 
 hiện có sau ngân sách chờ mặc định `22` giây. Nguồn phù hợp được lập chỉ mục riêng theo
 tổ chức trước khi chạy đối chiếu. Không dùng lựa chọn này cho tài liệu nhạy cảm nếu chưa có chính
 sách xử lý dữ liệu với nhà cung cấp tìm kiếm.
+
+`deepWebSearch` mặc định là `false` và chỉ có tác dụng khi `enableWebSearch` là `true`. Khi bật, báo cáo thường
+dùng chế độ xác minh sâu `whole-document-fingerprint-v4`: phủ vùng đầu, giữa và cuối, hỏi thêm các nhà cung cấp
+đã cấu hình với giới hạn nhỏ, trả riêng số vùng đã gửi tìm kiếm và số vùng có bằng chứng URL. Ngân sách chờ mặc
+định tối đa là `55` giây và có thể dùng thêm quota miễn phí. Với endpoint upload nhị phân, dùng header
+`X-Minh-Chung-Deep-Web-Search: 1`.
 
 Giới hạn upload mặc định là `250000000` byte và có thể đổi bằng
 `MINH_CHUNG_DOCUMENT_MAX_BYTES`. Client mới dùng endpoint tải nhị phân để không phải mã hóa cả

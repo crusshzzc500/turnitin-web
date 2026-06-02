@@ -843,6 +843,15 @@ input[type="url"]:focus {
   background: #f6faf6;
 }
 
+.deep-web-search-option {
+  background: #f8fbfa;
+}
+
+.deep-web-search-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .option-badge {
   display: inline-block;
   margin-top: 5px;

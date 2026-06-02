@@ -474,6 +474,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         content = self._read_bytes()
         payload = {
             "enableWebSearch": self.headers.get("X-Minh-Chung-Enable-Web-Search", "0") == "1",
+            "deepWebSearch": self.headers.get("X-Minh-Chung-Deep-Web-Search", "0") == "1",
             "webSearchMaxResults": self.headers.get("X-Minh-Chung-Web-Search-Max-Results", "10"),
             "saveReport": self.headers.get("X-Minh-Chung-Save-Report", "1") == "1",
             "indexForComparison": self.headers.get("X-Minh-Chung-Index-Submission", "0") == "1",
@@ -501,7 +502,13 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("Tài liệu cần có ít nhất 20 từ.")
         settings = payload.get("settings") or {}
         self._progress(progress, 12, "extracting", "Đã đọc nội dung tài liệu.")
-        web_discovery = self._discover_web_sources(payload, text, principal, progress)
+        web_discovery = self._discover_web_sources(
+            payload,
+            text,
+            principal,
+            progress,
+            thorough=bool(payload.get("deepWebSearch", False)),
+        )
         self._progress(progress, 76, "matching", "Đang đối chiếu với kho nguồn.")
         result = self.context.analyzer.analyze(
             text,
@@ -570,7 +577,13 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if count_words(text) < 20:
             raise ValueError("Không đọc được đủ nội dung văn bản từ tệp.")
         self._progress(progress, 18, "extracting", "Đã trích xuất nội dung tệp.")
-        web_discovery = self._discover_web_sources(payload, text, principal, progress)
+        web_discovery = self._discover_web_sources(
+            payload,
+            text,
+            principal,
+            progress,
+            thorough=bool(payload.get("deepWebSearch", False)),
+        )
         self._progress(progress, 76, "matching", "Đang đối chiếu với kho nguồn.")
         result = self.context.analyzer.analyze(text, organization_id=self._organization_scope(principal))
         if web_discovery is not None:

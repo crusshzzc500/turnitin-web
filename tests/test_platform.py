@@ -2200,7 +2200,63 @@ class ApiTest(unittest.TestCase):
                 self.assertNotIn("webDiscovery", default_report)
                 self.assertEqual(opted_in_report["webDiscovery"]["provider"], "tavily")
                 discover.assert_called_once()
+                self.assertFalse(discover.call_args.kwargs["thorough"])
+                self.assertEqual(discover.call_args.kwargs["max_results"], 10)
                 self.assertIn("web_discovery.search", {event["action"] for event in audit["events"]})
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_deep_web_search_runs_thorough_for_text_and_binary_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_server(settings_for(Path(directory), port=0))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_address[1]}"
+                text = (
+                    "Tài liệu quan trọng cần được rà sâu theo vùng đầu giữa và cuối để tìm nguồn công khai sát hơn. "
+                    "Người đọc vẫn kiểm tra từng URL làm bằng chứng trước khi đưa ra kết luận về nội dung bài viết."
+                )
+                web_result = {
+                    "provider": "tavily+exa",
+                    "enabled": True,
+                    "externalProcessing": True,
+                    "queries": ["truy vấn vùng đầu", "truy vấn vùng cuối"],
+                    "indexed": 2,
+                    "skipped": 0,
+                    "message": "Đã rà sâu nguồn web công khai.",
+                    "verificationMode": "thorough",
+                    "queryStrategy": "whole-document-fingerprint-v4",
+                    "regionalCoverage": {
+                        "searchedRegions": 3,
+                        "evidenceRegions": 2,
+                        "totalRegions": 3,
+                    },
+                    "sources": [],
+                }
+                with patch.object(server.context.web_discovery, "discover_and_index", return_value=web_result) as discover:  # type: ignore[attr-defined]
+                    text_report = self._json(
+                        f"{base}/api/analyze",
+                        method="POST",
+                        payload={"text": text, "enableWebSearch": True, "deepWebSearch": True},
+                    )
+                    created = self._raw_json(
+                        f"{base}/api/analysis-jobs/upload",
+                        content=text.encode("utf-8"),
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "X-Minh-Chung-Filename": "deep-report.txt",
+                            "X-Minh-Chung-Enable-Web-Search": "1",
+                            "X-Minh-Chung-Deep-Web-Search": "1",
+                        },
+                    )
+                    upload_report = self._poll_job(base, created)["result"]
+                self.assertEqual(discover.call_count, 2)
+                self.assertTrue(all(call.kwargs["thorough"] for call in discover.call_args_list))
+                self.assertTrue(all(call.kwargs["max_results"] == 20 for call in discover.call_args_list))
+                self.assertEqual(text_report["webDiscovery"]["verificationMode"], "thorough")
+                self.assertEqual(upload_report["webDiscovery"]["queryStrategy"], "whole-document-fingerprint-v4")
             finally:
                 server.shutdown()
                 server.server_close()

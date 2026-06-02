@@ -82,6 +82,7 @@ const elements = {
   authDisplayName: document.querySelector("#auth-display-name"),
   displayNameField: document.querySelector("#display-name-field"),
   enableWebSearch: document.querySelector("#enable-web-search"),
+  deepWebSearch: document.querySelector("#deep-web-search"),
   webDiscoveryHint: document.querySelector("#web-discovery-hint"),
   backendStatus: document.querySelector("#backend-status"),
   documentText: document.querySelector("#document-text"),
@@ -299,6 +300,7 @@ async function createTextAnalysisJob(text) {
       saveReport: true,
       indexForComparison: elements.indexSubmission.checked,
       enableWebSearch: elements.enableWebSearch.checked,
+      deepWebSearch: elements.deepWebSearch.checked,
       webSearchMaxResults: 10,
       settings: {
         excludeQuotes: elements.filterQuotes.checked,
@@ -317,6 +319,7 @@ async function createUploadAnalysisJob(file) {
       "X-Minh-Chung-User": state.currentUsername,
       "X-Minh-Chung-Filename": encodeURIComponent(file.name),
       "X-Minh-Chung-Enable-Web-Search": elements.enableWebSearch.checked ? "1" : "0",
+      "X-Minh-Chung-Deep-Web-Search": elements.deepWebSearch.checked ? "1" : "0",
       "X-Minh-Chung-Web-Search-Max-Results": "10",
       "X-Minh-Chung-Save-Report": "1",
       "X-Minh-Chung-Index-Submission": elements.indexSubmission.checked ? "1" : "0"
@@ -351,12 +354,37 @@ function permissions() {
   return state.session?.permissions || {};
 }
 
+function updateWebDiscoveryHint({ preferReport = true } = {}) {
+  const publicMode = Boolean(state.health?.publicMode);
+  const providers = state.health?.webDiscovery || {};
+  const maxQueries = Number(state.health?.webDiscoveryLimits?.queries || 10);
+  const timeBudget = Number(state.health?.webDiscoveryLimits?.timeBudgetSeconds || 22);
+  const thoroughTimeBudget = Number(state.health?.webDiscoveryLimits?.thoroughTimeBudgetSeconds || 55);
+  const configured = providers.tavily || providers.exa || providers.websearchapi || providers.linkup || providers.serper || providers.brave;
+  const aiQueryNotice = providers.geminiQueryExpansion
+    ? " Một phần nội dung có thể được gửi tới Gemini để tạo truy vấn tìm nguồn sát hơn."
+    : providers.openaiQueryExpansion
+      ? " Một phần nội dung có thể được gửi tới OpenAI để tạo truy vấn tìm nguồn sát hơn."
+      : "";
+  const selectionMessage = !configured
+    ? "Chưa cấu hình nhà cung cấp quét web. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
+    : !elements.enableWebSearch.checked
+      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống chọn thông minh tối đa ${maxQueries} dấu vân tay nội dung, loại nguồn trùng và dừng chờ nguồn chậm sau ${timeBudget} giây.${aiQueryNotice}`
+      : elements.deepWebSearch.checked
+        ? `Rà sâu toàn bài đang bật: hệ thống phủ vùng đầu, giữa và cuối, hỏi thêm các nguồn công khai đã cấu hình và có thể dùng tối đa ${thoroughTimeBudget} giây. Chế độ này dùng thêm lượt miễn phí.${aiQueryNotice}`
+        : `Quét thông minh đang bật: hệ thống ưu tiên tốc độ và trả kết quả hiện có sau tối đa ${timeBudget} giây. Bật rà sâu toàn bài nếu cần độ phủ cao hơn.${aiQueryNotice}`;
+  const discoveryMessage = preferReport && state.report?.webDiscovery?.message
+    ? `${state.report.webDiscovery.message} ${regionalCoverageSummary(state.report.webDiscovery)}`.trim()
+    : selectionMessage;
+  elements.webDiscoveryHint.textContent = publicMode
+    ? `Chế độ công khai không lưu bài hoặc báo cáo trên máy chủ. ${discoveryMessage}`
+    : discoveryMessage;
+}
+
 function applySessionUI() {
   const access = permissions();
   const publicMode = Boolean(state.health?.publicMode);
   const authRequired = Boolean(state.health?.authRequired);
-  const maxQueries = Number(state.health?.webDiscoveryLimits?.queries || 10);
-  const timeBudget = Number(state.health?.webDiscoveryLimits?.timeBudgetSeconds || 22);
   updateUploadLimit();
   elements.sourceAdder.hidden = !access.manageSources;
   elements.crawlerCard.hidden = !access.manageCrawler;
@@ -368,20 +396,9 @@ function applySessionUI() {
   elements.writingAssistantCard.hidden = !state.report || !state.health?.writingAssistant?.enabled;
   if (publicMode) elements.indexSubmission.checked = false;
   elements.downloadReportPdf.hidden = !state.backendAvailable || !state.report?.reportId;
-  const providers = state.health?.webDiscovery || {};
-  const aiQueryNotice = providers.geminiQueryExpansion
-    ? " Một phần nội dung có thể được gửi tới Gemini để tạo truy vấn tìm nguồn sát hơn."
-    : providers.openaiQueryExpansion
-      ? " Một phần nội dung có thể được gửi tới OpenAI để tạo truy vấn tìm nguồn sát hơn."
-      : "";
-  const discoveryMessage = state.report?.webDiscovery?.message || (
-    providers.tavily || providers.exa || providers.websearchapi || providers.linkup || providers.serper || providers.brave
-      ? `Quét web đang tắt để bảo vệ riêng tư. Khi bật, hệ thống chọn thông minh tối đa ${maxQueries} dấu vân tay nội dung, loại nguồn trùng và dừng chờ nguồn chậm sau ${timeBudget} giây.${aiQueryNotice}`
-      : "Chưa cấu hình nhà cung cấp quét web. Nếu bật quét web, báo cáo vẫn dùng kho nguồn hiện có."
-  );
-  elements.webDiscoveryHint.textContent = publicMode
-    ? `Chế độ công khai không lưu bài hoặc báo cáo trên máy chủ. ${discoveryMessage}`
-    : discoveryMessage;
+  elements.deepWebSearch.disabled = !elements.enableWebSearch.checked;
+  if (elements.deepWebSearch.disabled) elements.deepWebSearch.checked = false;
+  updateWebDiscoveryHint();
 }
 
 function renderAuditEvents(events = []) {
@@ -1056,6 +1073,16 @@ elements.downloadReportPdf.addEventListener("click", async () => {
 elements.documentText.addEventListener("input", () => {
   state.pendingFile = null;
   updateWordCounter();
+});
+
+elements.enableWebSearch.addEventListener("change", () => {
+  elements.deepWebSearch.disabled = !elements.enableWebSearch.checked;
+  if (elements.deepWebSearch.disabled) elements.deepWebSearch.checked = false;
+  updateWebDiscoveryHint({ preferReport: false });
+});
+
+elements.deepWebSearch.addEventListener("change", () => {
+  updateWebDiscoveryHint({ preferReport: false });
 });
 
 elements.fileInput.addEventListener("change", async (event) => {

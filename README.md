@@ -75,6 +75,12 @@ bằng điểm phủ từ khóa và cụm từ liên tiếp. Với tối đa `2`
 trang công khai theo `robots.txt` để bổ sung nội dung đầy đủ hơn mà không tốn thêm credit API.
 Không gửi toàn bộ tài liệu và không trả API key về trình duyệt.
 
+Với bài quan trọng, người dùng có thể bật thêm **Rà sâu toàn bài**. Báo cáo thường khi đó dùng cùng chế độ
+`whole-document-fingerprint-v4` như lượt tự rà của trợ lý Gemini: giữ dấu vân tay mạnh để bắt nguồn nhanh,
+phân bổ dấu vân tay qua phần đầu, giữa và cuối, hỏi thêm các nhà cung cấp đã cấu hình với giới hạn nhỏ,
+và trả riêng số vùng đã gửi tìm kiếm cùng số vùng đã có bằng chứng URL. Chế độ này có ngân sách tối đa
+mặc định `55` giây và dùng thêm quota miễn phí; vùng chưa có bằng chứng vẫn cần rà thủ công.
+
 Nguồn tìm được lưu bằng khóa nội bộ theo tổ chức, nên hai trường cùng tìm thấy một URL không ghi
 đè dữ liệu của nhau. Cấu hình một trong hai biến môi trường:
 
@@ -92,7 +98,7 @@ Tavily được ưu tiên nếu nhiều key cùng tồn tại. Mặc định Tav
 Exa fallback dùng `instant` và chỉ lấy `highlights`, không tải toàn văn trang.
 WebSearchAPI.ai dùng tìm kiếm cơ bản không tải toàn văn; Linkup dùng `fast` và `searchResults`.
 Serper precision chỉ lấy các đoạn tóm tắt kết quả Google và bị khóa tối đa `1` truy vấn cho mỗi báo cáo.
-Riêng lượt tự rà của trợ lý Gemini dùng chế độ xác minh sâu: dừng sớm khi đã thấy bản sao toàn bài; nếu chưa,
+Lựa chọn **Rà sâu toàn bài** và lượt tự rà của trợ lý Gemini dùng chế độ xác minh sâu: dừng sớm khi đã thấy bản sao toàn bài; nếu chưa,
 hệ thống hỏi thêm từng nhà cung cấp đã cấu hình trong ngân sách tối đa `55` giây cho mỗi lượt rà. Chế độ này
 có thể dùng thêm quota miễn phí để tăng độ phủ nguồn. Bộ chọn `whole-document-fingerprint-v4` giữ truy vấn
 mạnh nhất để bắt nguồn nhanh và phân bổ thêm dấu vân tay xuyên suốt phần đầu, giữa, cuối tài liệu dài.
