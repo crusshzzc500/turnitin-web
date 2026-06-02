@@ -162,6 +162,65 @@ def build_queries(text: str, *, max_queries: int = 3) -> list[str]:
     return [" ".join(fallback_tokens[:14])] if fallback_tokens else []
 
 
+def build_thorough_queries(text: str, *, max_queries: int = 10) -> list[str]:
+    if max_queries <= 0:
+        return []
+    document_tokens = _informative_tokens(text)
+    frequencies = Counter(document_tokens)
+    candidates: list[tuple[float, int, str]] = []
+    position = 0
+    for sentence in split_sentences(text):
+        clean = re.sub(r"\s+", " ", sentence).strip(" \t\n\r\"'“”‘’.:,;()[]{}")
+        for window_number, window in enumerate(_candidate_windows(clean)):
+            words = tokenize(window)
+            informative = set(_informative_tokens(window))
+            if 10 <= len(words) <= 32 and len(informative) >= 5:
+                rarity = sum(1 / max(1, frequencies[token]) for token in informative)
+                score = len(informative) * 2 + rarity + min(len(words), 28) / 10
+                candidates.append((score, position + window_number, window[:360]))
+        position += max(1, len(sentence))
+    if not candidates:
+        return build_queries(text, max_queries=max_queries)
+
+    excerpts: list[str] = []
+
+    def add_excerpt(excerpt: str) -> None:
+        if (
+            excerpt
+            and excerpt not in excerpts
+            and all(_query_overlap(excerpt, existing) < 0.82 for existing in excerpts)
+        ):
+            excerpts.append(excerpt)
+
+    strongest = max(candidates, key=lambda item: (item[0], len(item[2])))
+    add_excerpt(strongest[2])
+
+    # Keep representative fingerprints from across the document before AI expansion
+    # replaces any trailing queries. This helps catch copied sections outside the introduction.
+    bucket_count = min(5, max_queries)
+    ordered = sorted(candidates, key=lambda item: item[1])
+    for bucket in range(bucket_count):
+        start = round((len(ordered) * bucket) / bucket_count)
+        end = max(start + 1, round((len(ordered) * (bucket + 1)) / bucket_count))
+        regional = ordered[start:end]
+        if regional:
+            add_excerpt(max(regional, key=lambda item: (item[0], len(item[2])))[2])
+        if len(excerpts) >= max_queries:
+            break
+    for _score, _position, excerpt in sorted(candidates, reverse=True):
+        add_excerpt(excerpt)
+        if len(excerpts) >= max_queries:
+            break
+
+    queries = [query for excerpt in excerpts if (query := _exact_phrase_query(excerpt))]
+    for query in build_queries(text, max_queries=max_queries):
+        if query not in queries:
+            queries.append(query)
+        if len(queries) >= max_queries:
+            break
+    return queries[:max_queries]
+
+
 def normalize_candidate_url(value: str) -> str:
     parsed = urlparse(value.strip())
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
@@ -272,7 +331,8 @@ class WebDiscovery:
         self._active_deadline = time.monotonic() + time_budget
         with self._enrichment_lock:
             self._enrichment_remaining = self.settings.web_discovery_enrichment_max_sources
-        queries = build_queries(text, max_queries=self.settings.web_discovery_max_queries)
+        query_builder = build_thorough_queries if thorough else build_queries
+        queries = query_builder(text, max_queries=self.settings.web_discovery_max_queries)
         if not queries:
             return self._result_payload(DiscoveryResult(
                 "none", False, False, [], 0, 0,
@@ -402,6 +462,7 @@ class WebDiscovery:
     def _result_payload(result: DiscoveryResult, *, thorough: bool) -> dict[str, Any]:
         payload = result.to_dict()
         payload["verificationMode"] = "thorough" if thorough else "fast"
+        payload["queryStrategy"] = "whole-document-fingerprint-v3" if thorough else payload["queryStrategy"]
         return payload
 
     def _expand_queries_with_openai(self, text: str, queries: list[str]) -> list[str]:

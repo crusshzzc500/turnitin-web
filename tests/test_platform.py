@@ -38,6 +38,7 @@ from backend.web_discovery import (
     WebDiscovery,
     _focused_content_window,
     build_queries,
+    build_thorough_queries,
     candidate_relevance,
     normalize_candidate_url,
 )
@@ -1038,6 +1039,7 @@ class WebDiscoveryTest(unittest.TestCase):
                 payload = discovery.discover_and_index(text, organization_id=1, max_results=20, thorough=True)
             self.assertEqual(calls, ["serper", "tavily", "exa", "websearchapi", "linkup", "brave"])
             self.assertEqual(payload["verificationMode"], "thorough")
+            self.assertEqual(payload["queryStrategy"], "whole-document-fingerprint-v3")
             self.assertEqual(payload["indexed"], 20)
             self.assertEqual(tavily.call_args.args[2], 6)
             self.assertEqual(exa.call_args.args[2], 4)
@@ -1102,6 +1104,49 @@ class WebDiscoveryTest(unittest.TestCase):
         queries = build_queries(text, max_queries=3)
         self.assertGreaterEqual(len(queries), 2)
         self.assertTrue(all(10 <= len(query.split()) <= 32 for query in queries))
+
+    def test_thorough_queries_cover_beginning_middle_and_end_of_long_document(self) -> None:
+        text = " ".join(
+            [
+                "đầubài minh chứng nguồn công khai cần được kiểm tra bằng truy vấn chính xác xuyên suốt tài liệu.",
+                "vùnghai dữ liệu giáo dục minh bạch giúp người học rà soát nội dung tham khảo có trách nhiệm.",
+                "vùngba bằng chứng đối chiếu đáng tin cậy cần liên kết đúng trang nguồn đã được xác minh.",
+                "giữabài quy trình học thuật phân biệt trích dẫn hợp lệ với nội dung sao chép chưa ghi nhận nguồn.",
+                "vùngnăm hệ thống tìm kiếm lập chỉ mục đoạn văn phù hợp để báo cáo có thể giải trình rõ ràng.",
+                "vùngsáu người đọc cần kiểm tra từng ghi chú nguồn trước khi sử dụng bản đề xuất chỉnh sửa.",
+                "cuốibài dấu vân tay nội dung giúp phát hiện đoạn sao chép nằm xa phần mở đầu của tài liệu.",
+            ]
+        )
+        queries = build_thorough_queries(text, max_queries=7)
+        joined = " ".join(queries)
+        self.assertLessEqual(len(queries), 7)
+        self.assertIn("đầubài", joined)
+        self.assertIn("giữabài", joined)
+        self.assertIn("cuốibài", joined)
+
+    def test_thorough_discovery_sends_whole_document_queries_to_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            discovery = WebDiscovery(settings_for(root, tavily_api_key="tavily"), Storage(root / "test.db"))
+            text = " ".join(
+                [
+                    "BEGINMARKER verified public evidence should be searched with precise queries across the document.",
+                    "regiontwo academic review records sources carefully before a similarity report is accepted.",
+                    "regionthree transparent attribution helps readers inspect the supporting public source page.",
+                    "MIDDLEMARKER responsible citation workflow distinguishes quotations from uncited copied passages.",
+                    "regionfive similarity evidence remains linked to the indexed canonical public source address.",
+                    "regionsix reviewers inspect every citation marker before using an assisted revision proposal.",
+                    "ENDMARKER document fingerprints detect copied passages located far from the opening paragraph.",
+                ]
+            )
+            empty = DiscoveryResult("tavily", True, True, [], 0, 0, "No matching source.", [])
+            with patch.object(discovery, "_tavily", return_value=empty) as tavily:
+                payload = discovery.discover_and_index(text, organization_id=1, thorough=True)
+            submitted_queries = " ".join(tavily.call_args.args[0])
+            self.assertIn("BEGINMARKER", submitted_queries)
+            self.assertIn("MIDDLEMARKER", submitted_queries)
+            self.assertIn("ENDMARKER", submitted_queries)
+            self.assertEqual(payload["queryStrategy"], "whole-document-fingerprint-v3")
 
     def test_candidate_relevance_rewards_phrase_overlap_and_rejects_noise(self) -> None:
         query = "quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình"
@@ -1740,6 +1785,7 @@ class ApiTest(unittest.TestCase):
                 )
                 self.assertTrue(health["ok"])
                 self.assertEqual(health["searchBackend"], "sqlite-fts5")
+                self.assertEqual(health["webDiscoveryStrategy"], "adaptive-fingerprint-v3")
                 self.assertEqual(health["webDiscoveryLimits"]["queries"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["parallelWorkers"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["mode"], "fast")

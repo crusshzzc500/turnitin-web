@@ -20,6 +20,7 @@ Khi `DATABASE_URL` có giá trị, ứng dụng cũng tự ưu tiên chế độ
 - WebSearchAPI.ai và Linkup chỉ chạy fallback nếu tổng nguồn vẫn thiếu; mỗi bên nhận tối đa `1` truy vấn.
 - Lượt tự rà của trợ lý Gemini dùng xác minh sâu với ngân sách tối đa `55` giây cho mỗi lượt rà; nếu chưa
   thấy bản sao toàn bài, hệ thống hỏi thêm từng nhà cung cấp đã cấu hình và có thể dùng thêm quota miễn phí.
+  Bộ chọn `whole-document-fingerprint-v3` phân bổ dấu vân tay xuyên suốt phần đầu, giữa và cuối tài liệu dài.
 
 Tạo Blueprint từ repository chứa file `render.yaml`, sau đó nhập connection string Neon vào `DATABASE_URL`.
 Tiếp theo nhập `TAVILY_API_KEY`, `EXA_API_KEY`,
@@ -56,7 +57,7 @@ Add `GEMINI_API_KEY` in Render Environment to enable server-side AI query expans
 This option sends up to `12,000` characters of submitted text to Gemini only when an exact source has not already been found. It generates additional search queries; similarity percentages still require evidence from indexed source URLs. Free-tier Gemini API content may be used by Google to improve its products, so do not use this option for confidential documents.
 
 The revision assistant can send a submitted draft of up to `30,000` characters to Gemini after the user explicitly asks for a citation-aware revision. It scans the draft and the proposed revision with Minh Chứng. It does not bypass similarity tools or call Turnitin without an official licensed API integration.
-The two public-web scans use bounded thorough verification with `MINH_CHUNG_WEB_DISCOVERY_THOROUGH_TIME_BUDGET_SECONDS=55`.
+The two public-web scans use bounded thorough verification with `MINH_CHUNG_WEB_DISCOVERY_THOROUGH_TIME_BUDGET_SECONDS=55` and `whole-document-fingerprint-v3` coverage across the beginning, middle, and end of long documents.
 
 ## Optional OpenAI fallback
 

@@ -91,6 +91,7 @@ Tính năng này không gọi Turnitin nếu chưa có tích hợp API chính th
 Hai lượt quét của trợ lý dùng chế độ xác minh sâu: dừng sớm nếu đã thấy bản sao toàn bài; nếu chưa,
 hệ thống hỏi thêm từng nhà cung cấp web công khai đã cấu hình với giới hạn nhỏ cho mỗi bên. Mỗi lượt rà
 có ngân sách tối đa mặc định `55` giây và có thể dùng thêm quota miễn phí so với báo cáo thông thường.
+Bộ chọn `whole-document-fingerprint-v3` bảo đảm lấy dấu vân tay xuyên suốt phần đầu, giữa và cuối tài liệu dài.
 
 `indexForComparison` mặc định là `false`. Chỉ đặt thành `true` sau khi người nộp
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.

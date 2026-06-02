@@ -167,7 +167,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                     "searchBackend": self.context.search_backend.name,
                     "webDiscovery": self.context.web_discovery.status(),
                     "writingAssistant": self.context.writing_assistant.status(),
-                    "webDiscoveryStrategy": "adaptive-fingerprint-v2",
+                    "webDiscoveryStrategy": "adaptive-fingerprint-v3",
                     "publicMode": self.context.settings.public_mode,
                     "authRequired": self.context.settings.auth_mode == "password",
                     "documentMaxBytes": self.context.settings.document_max_bytes,

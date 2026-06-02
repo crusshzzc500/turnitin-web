@@ -666,7 +666,7 @@ function renderWritingAssistantResult(result) {
   const thoroughVerification = result.verificationReport?.webDiscovery?.verificationMode === "thorough";
   elements.writingAssistantStatus.textContent = result.externalWebVerification
     ? thoroughVerification
-      ? "Đã xác minh sâu bản đề xuất bằng kho nguồn và nhiều nguồn web công khai đã cấu hình."
+      ? "Đã xác minh sâu bản đề xuất bằng kho nguồn và nhiều nguồn web công khai đã cấu hình, phủ đều phần đầu, giữa và cuối bài."
       : "Đã quét lại bản đề xuất bằng kho nguồn và các nguồn web công khai đã cấu hình."
     : "Đã rà lại bằng kho nguồn hiện có. Bật quét web để kiểm tra rộng hơn.";
   elements.writingAssistantResult.hidden = false;
@@ -1164,7 +1164,7 @@ elements.writingAssistantButton.addEventListener("click", async () => {
   elements.writingAssistantButton.textContent = "Gemini đang xử lý...";
   const thoroughTimeBudget = Number(state.health?.webDiscoveryLimits?.thoroughTimeBudgetSeconds || 55);
   elements.writingAssistantStatus.textContent =
-    `Đang xác minh sâu bản gốc, tạo bản đề xuất có dẫn nguồn và tự rà lại qua nhiều nguồn công khai. Mỗi lượt rà web có thể dùng đến ${thoroughTimeBudget} giây và dùng thêm lượt miễn phí đã cấu hình.`;
+    `Đang xác minh sâu bản gốc, phủ đều phần đầu, giữa và cuối bài, tạo bản đề xuất có dẫn nguồn rồi tự rà lại qua nhiều nguồn công khai. Mỗi lượt rà web có thể dùng đến ${thoroughTimeBudget} giây và dùng thêm lượt miễn phí đã cấu hình.`;
   setAnalysisProgress({ progress: 1, phase: "queued", message: "Đang xếp yêu cầu chỉnh sửa vào hàng xử lý." });
   try {
     const result = await pollAnalysisJob(await createCitationRevisionJob(state.reportText));
