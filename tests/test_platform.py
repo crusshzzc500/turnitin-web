@@ -191,6 +191,7 @@ def settings_for(
     websearchapi_api_key: str = "",
     linkup_api_key: str = "",
     serper_api_key: str = "",
+    brave_search_api_key: str = "",
     gemini_api_key: str = "",
     openai_api_key: str = "",
     public_mode: bool = False,
@@ -212,6 +213,7 @@ def settings_for(
         websearchapi_api_key=websearchapi_api_key,
         linkup_api_key=linkup_api_key,
         serper_api_key=serper_api_key,
+        brave_search_api_key=brave_search_api_key,
         gemini_api_key=gemini_api_key,
         openai_api_key=openai_api_key,
         public_mode=public_mode,
@@ -448,6 +450,7 @@ class ConfigTest(unittest.TestCase):
                 os.environ,
                 {
                     "MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS": "150",
+                    "MINH_CHUNG_WEB_DISCOVERY_THOROUGH_TIME_BUDGET_SECONDS": "150",
                     "MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS": "45",
                     "MINH_CHUNG_WEB_DISCOVERY_ENRICHMENT_MAX_SOURCES": "4",
                 },
@@ -455,6 +458,7 @@ class ConfigTest(unittest.TestCase):
             ):
                 settings = Settings.from_env(Path(directory))
             self.assertEqual(settings.web_discovery_time_budget_seconds, 25.0)
+            self.assertEqual(settings.web_discovery_thorough_time_budget_seconds, 90.0)
             self.assertEqual(settings.web_discovery_request_timeout_seconds, 8.0)
             self.assertEqual(settings.web_discovery_enrichment_max_sources, 2)
 
@@ -529,6 +533,38 @@ class ExtractorTest(unittest.TestCase):
 
 
 class WebDiscoveryTest(unittest.TestCase):
+    def test_public_web_discovery_serializes_global_budget_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            discovery = WebDiscovery(settings_for(root), Storage(root / "test.db"))
+            state_lock = threading.Lock()
+            active = 0
+            maximum_active = 0
+
+            def slow_discovery(*_args, **_kwargs) -> dict:
+                nonlocal active, maximum_active
+                with state_lock:
+                    active += 1
+                    maximum_active = max(maximum_active, active)
+                time.sleep(0.02)
+                with state_lock:
+                    active -= 1
+                return {"provider": "none"}
+
+            with patch.object(discovery, "_discover_and_index", side_effect=slow_discovery):
+                threads = [
+                    threading.Thread(
+                        target=discovery.discover_and_index,
+                        kwargs={"text": "public text", "organization_id": 1},
+                    )
+                    for _index in range(3)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            self.assertEqual(maximum_active, 1)
+
     def test_gemini_expands_queries_with_structured_output_and_keeps_exact_query(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -952,6 +988,62 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertLessEqual(len(websearch.call_args.args[0]), 1)
             self.assertLessEqual(len(linkup.call_args.args[0]), 1)
             self.assertLessEqual(len(serper.call_args.args[0]), 1)
+
+    def test_thorough_verification_consults_each_configured_provider_with_small_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = Storage(root / "test.db")
+            discovery = WebDiscovery(
+                settings_for(
+                    root,
+                    tavily_api_key="tavily",
+                    exa_api_key="exa",
+                    websearchapi_api_key="websearch",
+                    linkup_api_key="linkup",
+                    serper_api_key="serper",
+                    brave_search_api_key="brave",
+                ),
+                storage,
+            )
+            text = "This sufficiently long excerpt verifies thorough public web source discovery with bounded provider quotas."
+            calls: list[str] = []
+
+            def result(provider: str, count: int) -> DiscoveryResult:
+                return DiscoveryResult(
+                    provider,
+                    True,
+                    True,
+                    [provider],
+                    count,
+                    0,
+                    f"{provider} sources.",
+                    [
+                        {
+                            "id": f"{provider}-{index}",
+                            "title": provider,
+                            "url": f"https://example.org/{provider}/{index}",
+                        }
+                        for index in range(count)
+                    ],
+                )
+
+            with (
+                patch.object(discovery, "_serper", side_effect=lambda *args, **kwargs: (calls.append("serper"), result("serper", 1))[1]),
+                patch.object(discovery, "_tavily", side_effect=lambda *args, **kwargs: (calls.append("tavily"), result("tavily", 6))[1]) as tavily,
+                patch.object(discovery, "_exa", side_effect=lambda *args, **kwargs: (calls.append("exa"), result("exa", 4))[1]) as exa,
+                patch.object(discovery, "_websearchapi", side_effect=lambda *args, **kwargs: (calls.append("websearchapi"), result("websearchapi", 3))[1]) as websearch,
+                patch.object(discovery, "_linkup", side_effect=lambda *args, **kwargs: (calls.append("linkup"), result("linkup", 3))[1]) as linkup,
+                patch.object(discovery, "_brave", side_effect=lambda *args, **kwargs: (calls.append("brave"), result("brave", 3))[1]) as brave,
+            ):
+                payload = discovery.discover_and_index(text, organization_id=1, max_results=20, thorough=True)
+            self.assertEqual(calls, ["serper", "tavily", "exa", "websearchapi", "linkup", "brave"])
+            self.assertEqual(payload["verificationMode"], "thorough")
+            self.assertEqual(payload["indexed"], 20)
+            self.assertEqual(tavily.call_args.args[2], 6)
+            self.assertEqual(exa.call_args.args[2], 4)
+            self.assertEqual(websearch.call_args.args[2], 3)
+            self.assertEqual(linkup.call_args.args[2], 3)
+            self.assertEqual(brave.call_args.args[2], 3)
 
     def test_tavily_uses_fast_snippets_without_raw_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1652,6 +1744,7 @@ class ApiTest(unittest.TestCase):
                 self.assertEqual(health["webDiscoveryLimits"]["parallelWorkers"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["mode"], "fast")
                 self.assertEqual(health["webDiscoveryLimits"]["timeBudgetSeconds"], 22.0)
+                self.assertEqual(health["webDiscoveryLimits"]["thoroughTimeBudgetSeconds"], 55.0)
                 self.assertEqual(health["webDiscoveryLimits"]["fallbackMinSources"], 8)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMaxQueries"], 3)
                 self.assertEqual(health["webDiscoveryLimits"]["exaMode"], "instant")
@@ -1703,6 +1796,7 @@ class ApiTest(unittest.TestCase):
                     "indexed": 1,
                     "skipped": 0,
                     "message": "Đã rà nguồn web công khai.",
+                    "verificationMode": "thorough",
                     "sources": [],
                 }
                 proposal = {
@@ -1725,6 +1819,8 @@ class ApiTest(unittest.TestCase):
                     result = self._poll_job(base, created)["result"]
                 audit = self._json(f"{base}/api/audit")
                 self.assertEqual(discover.call_count, 2)
+                self.assertTrue(all(call.kwargs["thorough"] for call in discover.call_args_list))
+                self.assertTrue(all(call.kwargs["max_results"] == 20 for call in discover.call_args_list))
                 self.assertEqual(revise.call_count, 1)
                 self.assertEqual(result["revision"], revision)
                 self.assertTrue(result["externalWebVerification"])

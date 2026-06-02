@@ -217,6 +217,7 @@ class WebDiscovery:
         self.settings = settings
         self.storage = storage
         self.crawler: Any | None = None
+        self._discovery_lock = threading.Lock()
         self._enrichment_lock = threading.Lock()
         self._enrichment_remaining = 0
         self._active_deadline = 0.0
@@ -243,16 +244,40 @@ class WebDiscovery:
         organization_id: int | None,
         max_results: int | None = None,
         progress_callback: DiscoveryProgressCallback | None = None,
+        thorough: bool = False,
     ) -> dict[str, Any]:
-        self._active_deadline = time.monotonic() + self.settings.web_discovery_time_budget_seconds
+        with self._discovery_lock:
+            return self._discover_and_index(
+                text,
+                organization_id=organization_id,
+                max_results=max_results,
+                progress_callback=progress_callback,
+                thorough=thorough,
+            )
+
+    def _discover_and_index(
+        self,
+        text: str,
+        *,
+        organization_id: int | None,
+        max_results: int | None = None,
+        progress_callback: DiscoveryProgressCallback | None = None,
+        thorough: bool = False,
+    ) -> dict[str, Any]:
+        time_budget = (
+            self.settings.web_discovery_thorough_time_budget_seconds
+            if thorough
+            else self.settings.web_discovery_time_budget_seconds
+        )
+        self._active_deadline = time.monotonic() + time_budget
         with self._enrichment_lock:
             self._enrichment_remaining = self.settings.web_discovery_enrichment_max_sources
         queries = build_queries(text, max_queries=self.settings.web_discovery_max_queries)
         if not queries:
-            return DiscoveryResult(
+            return self._result_payload(DiscoveryResult(
                 "none", False, False, [], 0, 0,
                 "Không tạo được truy vấn tìm kiếm từ tài liệu.", [],
-            ).to_dict()
+            ), thorough=thorough)
         result_limit = max_results or self.settings.web_discovery_max_results
         result_limit = max(1, min(20, int(result_limit)))
         result: DiscoveryResult | None = None
@@ -265,7 +290,7 @@ class WebDiscovery:
                 comparison_text=text,
             )
         if self._has_exact_document_match(result):
-            return result.to_dict()
+            return self._result_payload(result, thorough=thorough)
         gemini_queries = self._expand_queries_with_gemini(text, queries)
         queries = (
             gemini_queries
@@ -280,24 +305,24 @@ class WebDiscovery:
             primary = self._tavily(
                 queries,
                 organization_id,
-                self._remaining_result_limit(result_limit, result),
+                self._provider_result_limit(result_limit, result, maximum=6 if thorough else 10),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
                 comparison_text=text,
             )
             result = primary if result is None else self._merge_results(result, primary)
         if self._has_exact_document_match(result):
-            return result.to_dict()
+            return self._result_payload(result, thorough=thorough)
         if (
             self.settings.exa_api_key
             and self._time_available()
-            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and (thorough or result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
             and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._exa(
                 queries[: self.settings.web_discovery_exa_max_queries],
                 organization_id,
-                self._remaining_result_limit(result_limit, result),
+                self._provider_result_limit(result_limit, result, maximum=4 if thorough else 10),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
@@ -305,13 +330,13 @@ class WebDiscovery:
         if (
             self.settings.websearchapi_api_key
             and self._time_available()
-            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and (thorough or result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
             and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._websearchapi(
                 queries[: self.settings.web_discovery_websearchapi_max_queries],
                 organization_id,
-                self._remaining_result_limit(result_limit, result),
+                self._provider_result_limit(result_limit, result, maximum=3 if thorough else 10),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
@@ -319,24 +344,36 @@ class WebDiscovery:
         if (
             self.settings.linkup_api_key
             and self._time_available()
-            and (result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
+            and (thorough or result is None or result.indexed < self.settings.web_discovery_fallback_min_sources)
             and self._remaining_result_limit(result_limit, result) > 0
         ):
             fallback = self._linkup(
                 queries[: self.settings.web_discovery_linkup_max_queries],
                 organization_id,
-                self._remaining_result_limit(result_limit, result),
+                self._provider_result_limit(result_limit, result, maximum=3 if thorough else 10),
+                progress_callback,
+                initial_seen_urls={source["url"] for source in result.sources} if result else None,
+            )
+            result = fallback if result is None else self._merge_results(result, fallback)
+        if (
+            self.settings.brave_search_api_key
+            and self._time_available()
+            and (thorough or result is None)
+            and self._remaining_result_limit(result_limit, result) > 0
+        ):
+            fallback = self._brave(
+                queries[:1] if thorough else queries,
+                organization_id,
+                self._provider_result_limit(result_limit, result, maximum=3 if thorough else 10),
                 progress_callback,
                 initial_seen_urls={source["url"] for source in result.sources} if result else None,
             )
             result = fallback if result is None else self._merge_results(result, fallback)
         if result is not None:
-            return result.to_dict()
-        if self.settings.brave_search_api_key and self._time_available():
-            return self._brave(queries, organization_id, result_limit, progress_callback).to_dict()
+            return self._result_payload(result, thorough=thorough)
         if progress_callback:
             progress_callback(len(queries), len(queries), 0)
-        return DiscoveryResult(
+        return self._result_payload(DiscoveryResult(
             "not-configured",
             False,
             False,
@@ -345,11 +382,27 @@ class WebDiscovery:
             0,
             "Chưa cấu hình Tavily, Exa, WebSearchAPI.ai, Linkup, Serper hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
             [],
-        ).to_dict()
+        ), thorough=thorough)
 
     @staticmethod
     def _remaining_result_limit(result_limit: int, result: DiscoveryResult | None) -> int:
         return max(0, min(10, result_limit - (result.indexed if result else 0)))
+
+    @classmethod
+    def _provider_result_limit(
+        cls,
+        result_limit: int,
+        result: DiscoveryResult | None,
+        *,
+        maximum: int,
+    ) -> int:
+        return min(maximum, cls._remaining_result_limit(result_limit, result))
+
+    @staticmethod
+    def _result_payload(result: DiscoveryResult, *, thorough: bool) -> dict[str, Any]:
+        payload = result.to_dict()
+        payload["verificationMode"] = "thorough" if thorough else "fast"
+        return payload
 
     def _expand_queries_with_openai(self, text: str, queries: list[str]) -> list[str]:
         maximum = self.settings.openai_query_expansion_max_queries
@@ -599,10 +652,11 @@ class WebDiscovery:
         organization_id: int | None,
         max_results: int,
         progress_callback: DiscoveryProgressCallback | None = None,
+        initial_seen_urls: set[str] | None = None,
     ) -> DiscoveryResult:
         sources: list[dict[str, Any]] = []
         skipped = 0
-        seen_urls: set[str] = set()
+        seen_urls = _normalized_url_set(initial_seen_urls)
         errors: list[str] = []
         workers = min(len(queries), self.settings.web_discovery_parallel_workers)
         timed_out = 0

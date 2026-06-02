@@ -177,6 +177,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                         "parallelWorkers": self.context.settings.web_discovery_parallel_workers,
                         "mode": self.context.settings.web_discovery_mode,
                         "timeBudgetSeconds": self.context.settings.web_discovery_time_budget_seconds,
+                        "thoroughTimeBudgetSeconds": self.context.settings.web_discovery_thorough_time_budget_seconds,
                         "fallbackMinSources": self.context.settings.web_discovery_fallback_min_sources,
                         "exaMaxQueries": self.context.settings.web_discovery_exa_max_queries,
                         "exaMode": self.context.settings.web_discovery_exa_mode,
@@ -420,6 +421,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             progress_start=10,
             progress_range=18,
             audit_phase="citation-revision-original",
+            thorough=True,
         )
         original_report = self.context.analyzer.analyze(text, **analyzer_kwargs)
         if original_discovery is not None:
@@ -436,6 +438,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             progress_start=70,
             progress_range=16,
             audit_phase="citation-revision-verification",
+            thorough=True,
         )
         verification_report = self.context.analyzer.analyze(revision, **analyzer_kwargs)
         if verification_discovery is not None:
@@ -446,7 +449,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             "verificationReport": verification_report,
             "externalWebVerification": verification_discovery is not None,
             "checkerNotice": (
-                "Bản đề xuất đã được tự rà lại bằng hệ thống Minh Chứng. "
+                "Bản đề xuất đã được tự rà lại bằng chế độ xác minh sâu của hệ thống Minh Chứng. "
                 "Không có kết nối Turnitin vì ứng dụng chưa được cấp API chính thức từ Turnitin."
             ),
         }
@@ -460,6 +463,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 "originalPercent": original_report["percent"],
                 "verificationPercent": verification_report["percent"],
                 "externalWebVerification": verification_discovery is not None,
+                "verificationMode": "thorough",
             },
         )
         self._progress(progress, 96, "finalizing", "Đã hoàn tất bản đề xuất và lượt tự rà lại.")
@@ -605,6 +609,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         progress_start: int = 22,
         progress_range: int = 50,
         audit_phase: str = "report",
+        thorough: bool = False,
     ) -> dict[str, Any] | None:
         if not bool(payload.get("enableWebSearch", False)):
             self._progress(
@@ -614,17 +619,20 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 "Bỏ qua quét web theo lựa chọn của bạn.",
             )
             return None
-        self._progress(progress, progress_start, "web_discovery", "Đang quét song song các nguồn web công khai.")
+        discovery_label = "xác minh sâu qua nhiều nguồn web công khai" if thorough else "quét song song các nguồn web công khai"
+        self._progress(progress, progress_start, "web_discovery", f"Đang {discovery_label}.")
+        requested_results = max(1, min(20, int(payload.get("webSearchMaxResults", 10))))
         result = self.context.web_discovery.discover_and_index(
             text,
             organization_id=self._organization_scope(principal),
-            max_results=max(1, min(20, int(payload.get("webSearchMaxResults", 10)))),
+            max_results=20 if thorough else requested_results,
             progress_callback=lambda completed, total, indexed: self._progress(
                 progress,
                 progress_start + round((completed / max(1, total)) * progress_range),
                 "web_discovery",
                 f"Đã quét {completed}/{total} truy vấn web, tìm thấy {indexed} nguồn phù hợp.",
             ),
+            thorough=thorough,
         )
         self._audit(
             principal,
@@ -637,6 +645,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 "queryCount": len(result["queries"]),
                 "externalProcessing": result["externalProcessing"],
                 "phase": audit_phase,
+                "verificationMode": result.get("verificationMode", "thorough" if thorough else "fast"),
             },
         )
         return result

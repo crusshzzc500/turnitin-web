@@ -56,6 +56,7 @@ class Settings:
     web_discovery_parallel_workers: int = 10
     web_discovery_mode: str = "fast"
     web_discovery_time_budget_seconds: float = 22.0
+    web_discovery_thorough_time_budget_seconds: float = 55.0
     web_discovery_request_timeout_seconds: float = 7.0
     web_discovery_fallback_min_sources: int = 8
     web_discovery_exa_max_queries: int = 3
@@ -157,6 +158,10 @@ class Settings:
             web_discovery_time_budget_seconds=max(
                 1.0,
                 min(25.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS", "22"))),
+            ),
+            web_discovery_thorough_time_budget_seconds=max(
+                25.0,
+                min(90.0, float(os.getenv("MINH_CHUNG_WEB_DISCOVERY_THOROUGH_TIME_BUDGET_SECONDS", "55"))),
             ),
             web_discovery_request_timeout_seconds=max(
                 1.0,

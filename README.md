@@ -30,8 +30,8 @@ File `render.yaml` bật đăng nhập mật khẩu và lưu dữ liệu bền v
 - Đoạn tô màu, tỷ lệ tương đồng, danh sách nguồn và lịch sử báo cáo phía server.
 - Xuất báo cáo PDF có thông tin tổ chức, điểm tương đồng, nguồn, đoạn đối chiếu và cảnh báo liêm chính.
 - PDF scan ít chữ tự thử OCR khi máy chủ có Tesseract và `pdf2image`.
-- Quét bổ sung nguồn web công khai qua Tavily, Exa, WebSearchAPI.ai, Linkup, Serper hoặc Brave khi người dùng chủ động bật;
-  Tavily dùng `fast`, các tầng sau chỉ chạy fallback khi nguồn trước còn thiếu, và mỗi nhà cung cấp dừng chờ
+- Quét bổ sung nguồn web công khai qua Serper, Tavily, Exa, WebSearchAPI.ai, Linkup hoặc Brave khi người dùng chủ động bật;
+  Serper thử một truy vấn chính xác trước, Tavily dùng `fast`, các tầng sau chỉ chạy fallback khi nguồn trước còn thiếu, và mỗi nhà cung cấp dừng chờ
   nguồn chậm sau ngân sách thời gian cấu hình.
 - Chuẩn hóa Unicode cho văn bản đầu vào có lỗi mã hóa có thể phục hồi; nội dung báo cáo hiển thị bằng
   Times New Roman.
@@ -67,8 +67,8 @@ chọn thông minh tối đa `10` dấu vân tay nội dung và gửi truy vấn
 câu có nhiều thuật ngữ hiếm, cắt câu dài thành cửa sổ có thể tìm kiếm, tránh truy vấn gần trùng và dành
 một phần ngân sách sẵn có cho chữ ký từ khóa cô đọng để bắt cả nội dung đã sửa nhẹ câu chữ. Khi Tavily trả về ít hơn
 `8` nguồn hữu ích hoặc không dùng được, Exa fallback chỉ nhận tối đa `3` truy vấn để tiết kiệm quota.
-Nếu tổng nguồn vẫn thiếu, WebSearchAPI.ai và Linkup lần lượt chỉ nhận tối đa `1` truy vấn, sau đó Serper
-fallback chỉ nhận tối đa `1` truy vấn. Brave là lựa chọn dự phòng tiếp theo khi không có các key trên. Mỗi truy vấn
+Serper thử tối đa `1` truy vấn chính xác trước chuỗi trên để dừng sớm nếu tìm thấy bản sao toàn bài. Nếu tổng nguồn
+vẫn thiếu, WebSearchAPI.ai và Linkup lần lượt chỉ nhận tối đa `1` truy vấn. Brave là lựa chọn dự phòng tiếp theo. Mỗi truy vấn
 nhận tối đa `10` kết quả ứng viên, sau đó hệ thống lập chỉ mục nguồn phù hợp trong phạm vi tổ chức
 rồi mới chạy đối chiếu. URL tracking được chuẩn hóa để tránh nguồn trùng; kết quả ít liên quan bị loại
 bằng điểm phủ từ khóa và cụm từ liên tiếp. Với tối đa `2` ứng viên tốt có đoạn mô tả ngắn, hệ thống tải
@@ -91,12 +91,16 @@ Tavily được ưu tiên nếu nhiều key cùng tồn tại. Mặc định Tav
 `raw_content`, và WebDiscovery trả kết quả hiện có sau ngân sách chờ chung khoảng `22` giây.
 Exa fallback dùng `instant` và chỉ lấy `highlights`, không tải toàn văn trang.
 WebSearchAPI.ai dùng tìm kiếm cơ bản không tải toàn văn; Linkup dùng `fast` và `searchResults`.
-Serper fallback chỉ lấy các đoạn tóm tắt kết quả Google và bị khóa tối đa `1` truy vấn cho mỗi báo cáo.
+Serper precision chỉ lấy các đoạn tóm tắt kết quả Google và bị khóa tối đa `1` truy vấn cho mỗi báo cáo.
+Riêng lượt tự rà của trợ lý Gemini dùng chế độ xác minh sâu: dừng sớm khi đã thấy bản sao toàn bài; nếu chưa,
+hệ thống hỏi thêm từng nhà cung cấp đã cấu hình trong ngân sách tối đa `55` giây cho mỗi lượt rà. Chế độ này
+có thể dùng thêm quota miễn phí để tăng độ phủ nguồn.
 Có thể điều chỉnh giới hạn bằng
 `MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES`, `MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS` và
 `MINH_CHUNG_WEB_DISCOVERY_MAX_CONTENT_CHARS`. Số truy vấn đồng thời dùng
 `MINH_CHUNG_WEB_DISCOVERY_PARALLEL_WORKERS`. Chế độ Tavily và thời gian chờ dùng
-`MINH_CHUNG_WEB_DISCOVERY_MODE`, `MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS` và
+`MINH_CHUNG_WEB_DISCOVERY_MODE`, `MINH_CHUNG_WEB_DISCOVERY_TIME_BUDGET_SECONDS`,
+`MINH_CHUNG_WEB_DISCOVERY_THOROUGH_TIME_BUDGET_SECONDS` và
 `MINH_CHUNG_WEB_DISCOVERY_REQUEST_TIMEOUT_SECONDS`. Fallback Exa dùng
 `MINH_CHUNG_WEB_DISCOVERY_FALLBACK_MIN_SOURCES`, `MINH_CHUNG_WEB_DISCOVERY_EXA_MAX_QUERIES` và
 `MINH_CHUNG_WEB_DISCOVERY_EXA_MODE`. Giới hạn WebSearchAPI.ai và Linkup dùng
@@ -159,6 +163,8 @@ $env:MINH_CHUNG_GEMINI_TIMEOUT_SECONDS = '4'
 ## Citation-aware Gemini writing assistant
 
 When Gemini is configured, a report can open a citation-aware revision assistant. The user must explicitly enable public-web scanning before requesting a revision. The server scans the original draft, asks Gemini to improve clarity and add source markers, scans the proposed revision again, and returns both similarity percentages for review.
+
+The two assistant scans use a bounded thorough verification mode. Unless an exact document match is already found, the server consults each configured public-web provider with small per-provider caps. This can use more free-tier quota than a normal report and has a default budget of up to `55` seconds for each web scan.
 
 The assistant is intentionally not a plagiarism-evasion or AI-detector-evasion tool. It does not claim that generated writing is human-authored or original. It preserves quotations, adds `[Nguồn n]` markers for verified sources, and uses `[Cần trích dẫn nguồn]` when attribution still needs manual work. Turnitin is not called unless a future deployment receives an official licensed API integration.
 

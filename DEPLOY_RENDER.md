@@ -13,11 +13,13 @@ PostgreSQL Neon qua biến `DATABASE_URL`. Ở chế độ này:
 Khi `DATABASE_URL` có giá trị, ứng dụng cũng tự ưu tiên chế độ chính thức và đăng nhập mật khẩu.
 Điều này tránh việc một biến demo cũ còn sót lại trên Render vô tình tắt lưu lịch sử.
 - Tùy chọn quét web mặc định tắt; chỉ gửi đoạn trích sang nhà cung cấp tìm kiếm bên ngoài khi khách chủ động bật.
-- Tavily dùng `fast`, không lấy toàn bộ nội dung trang và có ngân sách chờ tối đa `150` giây.
+- Serper thử tối đa `1` truy vấn chính xác trước để dừng sớm nếu tìm thấy bản sao toàn bài.
+- Tavily dùng `fast`, không lấy toàn bộ nội dung trang và báo cáo thường có ngân sách chờ tối đa `22` giây.
 - Exa chỉ chạy fallback khi Tavily thiếu nguồn, dùng `instant`, lấy `highlights` và nhận tối đa `3`
   truy vấn mỗi báo cáo để tiết kiệm quota miễn phí.
 - WebSearchAPI.ai và Linkup chỉ chạy fallback nếu tổng nguồn vẫn thiếu; mỗi bên nhận tối đa `1` truy vấn.
-- Serper chỉ chạy fallback cuối nếu tổng nguồn vẫn thiếu, nhận tối đa `1` truy vấn mỗi báo cáo.
+- Lượt tự rà của trợ lý Gemini dùng xác minh sâu với ngân sách tối đa `55` giây cho mỗi lượt rà; nếu chưa
+  thấy bản sao toàn bài, hệ thống hỏi thêm từng nhà cung cấp đã cấu hình và có thể dùng thêm quota miễn phí.
 
 Tạo Blueprint từ repository chứa file `render.yaml`, sau đó nhập connection string Neon vào `DATABASE_URL`.
 Tiếp theo nhập `TAVILY_API_KEY`, `EXA_API_KEY`,
@@ -54,6 +56,7 @@ Add `GEMINI_API_KEY` in Render Environment to enable server-side AI query expans
 This option sends up to `12,000` characters of submitted text to Gemini only when an exact source has not already been found. It generates additional search queries; similarity percentages still require evidence from indexed source URLs. Free-tier Gemini API content may be used by Google to improve its products, so do not use this option for confidential documents.
 
 The revision assistant can send a submitted draft of up to `30,000` characters to Gemini after the user explicitly asks for a citation-aware revision. It scans the draft and the proposed revision with Minh Chứng. It does not bypass similarity tools or call Turnitin without an official licensed API integration.
+The two public-web scans use bounded thorough verification with `MINH_CHUNG_WEB_DISCOVERY_THOROUGH_TIME_BUDGET_SECONDS=55`.
 
 ## Optional OpenAI fallback
 

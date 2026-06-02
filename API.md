@@ -88,17 +88,20 @@ Ví dụ tạo bản đề xuất có dẫn nguồn và tự rà lại:
 
 Trợ lý yêu cầu `GEMINI_API_KEY`, quét bản gốc, tạo bản đề xuất có dẫn nguồn và quét lại bản đề xuất.
 Tính năng này không gọi Turnitin nếu chưa có tích hợp API chính thức được cấp phép.
+Hai lượt quét của trợ lý dùng chế độ xác minh sâu: dừng sớm nếu đã thấy bản sao toàn bài; nếu chưa,
+hệ thống hỏi thêm từng nhà cung cấp web công khai đã cấu hình với giới hạn nhỏ cho mỗi bên. Mỗi lượt rà
+có ngân sách tối đa mặc định `55` giây và có thể dùng thêm quota miễn phí so với báo cáo thông thường.
 
 `indexForComparison` mặc định là `false`. Chỉ đặt thành `true` sau khi người nộp
 đã đồng ý đưa bài vào kho nội bộ để đối chiếu các lần sau.
 
 `enableWebSearch` cũng mặc định là `false`. Khi đặt thành `true`, tối đa `10` đoạn trích nổi bật
 được gửi song song sang Tavily để tìm nguồn công khai. Nếu Tavily thiếu nguồn hoặc không dùng được,
-Exa `instant` fallback nhận tối đa `3` truy vấn và chỉ trả `highlights` để tiết kiệm quota miễn phí.
-Nếu tổng nguồn vẫn thiếu, WebSearchAPI.ai và Linkup lần lượt nhận tối đa `1` truy vấn, sau đó Serper
-fallback nhận tối đa `1` truy vấn. Brave là dự phòng tiếp theo khi không có các key trên. Mỗi truy vấn nhận tối đa `10`
+Serper thử tối đa `1` truy vấn chính xác trước để dừng sớm nếu tìm thấy bản sao toàn bài. Exa `instant` fallback
+nhận tối đa `3` truy vấn và chỉ trả `highlights` để tiết kiệm quota miễn phí. Nếu tổng nguồn vẫn thiếu,
+WebSearchAPI.ai và Linkup lần lượt nhận tối đa `1` truy vấn. Brave là dự phòng tiếp theo. Mỗi truy vấn nhận tối đa `10`
 kết quả ứng viên. Tavily mặc định dùng `fast`, chỉ lấy đoạn tóm tắt và hệ thống trả kết quả
-hiện có sau ngân sách chờ mặc định `150` giây. Nguồn phù hợp được lập chỉ mục riêng theo
+hiện có sau ngân sách chờ mặc định `22` giây. Nguồn phù hợp được lập chỉ mục riêng theo
 tổ chức trước khi chạy đối chiếu. Không dùng lựa chọn này cho tài liệu nhạy cảm nếu chưa có chính
 sách xử lý dữ liệu với nhà cung cấp tìm kiếm.
 
