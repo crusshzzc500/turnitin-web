@@ -952,7 +952,10 @@ input[type="url"]:focus {
   border-top: 1px solid var(--line);
 }
 
-.revision-score-grid,
+.revision-score-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .revision-notes {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -981,6 +984,14 @@ input[type="url"]:focus {
   color: var(--forest);
   font-family: "Newsreader", Georgia, serif;
   font-size: 27px;
+}
+
+.revision-score-grid small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .writing-assistant-result label {

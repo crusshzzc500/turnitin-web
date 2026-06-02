@@ -126,6 +126,8 @@ const elements = {
   writingAssistantText: document.querySelector("#writing-assistant-text"),
   revisionOriginalScore: document.querySelector("#revision-original-score"),
   revisionVerificationScore: document.querySelector("#revision-verification-score"),
+  revisionRegionCoverage: document.querySelector("#revision-region-coverage"),
+  revisionRegionEvidence: document.querySelector("#revision-region-evidence"),
   writingAssistantNotes: document.querySelector("#writing-assistant-notes"),
   writingAssistantCitations: document.querySelector("#writing-assistant-citations"),
   writingAssistantNotice: document.querySelector("#writing-assistant-notice"),
@@ -559,6 +561,15 @@ function scoreMessage(percent) {
   };
 }
 
+function regionalCoverageSummary(discovery) {
+  const coverage = discovery?.regionalCoverage;
+  if (!coverage) return "";
+  if (coverage.completeDocumentMatch) {
+    return "Đã tìm thấy bản sao toàn bài trên một URL công khai.";
+  }
+  return `Đã gửi tìm kiếm ${Number(coverage.searchedRegions || 0)}/${Number(coverage.totalRegions || 0)} vùng và tìm thấy bằng chứng URL cho ${Number(coverage.evidenceRegions || 0)}/${Number(coverage.totalRegions || 0)} vùng. ${coverage.warning || ""}`.trim();
+}
+
 function renderReport() {
   if (!state.report) return;
 
@@ -575,8 +586,9 @@ function renderReport() {
   elements.metricMatches.textContent = matchedSegments.length;
   elements.metricSources.textContent = sources.length;
   const discovery = state.report.webDiscovery;
+  const coverageSummary = regionalCoverageSummary(discovery);
   elements.reportDiscoverySummary.textContent = discovery
-    ? `${discovery.message} Đã tạo ${discovery.queries?.length || 0} truy vấn và ghi nhận ${discovery.indexed || 0} nguồn web.`
+    ? `${discovery.message} Đã tạo ${discovery.queries?.length || 0} truy vấn và ghi nhận ${discovery.indexed || 0} nguồn web. ${coverageSummary}`.trim()
     : "Báo cáo dùng kho nguồn hiện có. Bật quét web khi bạn muốn tìm thêm nguồn công khai.";
 
   elements.documentPreview.innerHTML = segments
@@ -647,6 +659,16 @@ function renderWritingAssistantResult(result) {
   state.writingAssistantResult = result;
   elements.revisionOriginalScore.textContent = `${Number(result.originalReport?.percent || 0)}%`;
   elements.revisionVerificationScore.textContent = `${Number(result.verificationReport?.percent || 0)}%`;
+  const verificationDiscovery = result.verificationReport?.webDiscovery;
+  const coverage = verificationDiscovery?.regionalCoverage;
+  elements.revisionRegionCoverage.textContent = coverage
+    ? `${Number(coverage.searchedRegions || 0)}/${Number(coverage.totalRegions || 0)}`
+    : "—";
+  elements.revisionRegionEvidence.textContent = coverage
+    ? coverage.completeDocumentMatch
+      ? "Đã thấy bản sao toàn bài"
+      : `Có bằng chứng URL: ${Number(coverage.evidenceRegions || 0)}/${Number(coverage.totalRegions || 0)} vùng`
+    : "Chưa có số liệu phủ vùng";
   elements.writingAssistantText.value = result.revision || "";
   const notes = result.editorNotes || [];
   elements.writingAssistantNotes.innerHTML = notes.length
@@ -663,10 +685,11 @@ function renderWritingAssistantResult(result) {
         .join("")
     : "<li>Chưa có ghi chú nguồn cụ thể. Kiểm tra lại các vị trí [Cần trích dẫn nguồn] trong bài.</li>";
   elements.writingAssistantNotice.textContent = `${result.notice || ""} ${result.checkerNotice || ""}`.trim();
-  const thoroughVerification = result.verificationReport?.webDiscovery?.verificationMode === "thorough";
+  const thoroughVerification = verificationDiscovery?.verificationMode === "thorough";
+  const coverageSummary = regionalCoverageSummary(verificationDiscovery);
   elements.writingAssistantStatus.textContent = result.externalWebVerification
     ? thoroughVerification
-      ? "Đã xác minh sâu bản đề xuất bằng kho nguồn và nhiều nguồn web công khai đã cấu hình, phủ đều phần đầu, giữa và cuối bài."
+      ? `Đã xác minh sâu bản đề xuất bằng kho nguồn và nhiều nguồn web công khai đã cấu hình. ${coverageSummary}`.trim()
       : "Đã quét lại bản đề xuất bằng kho nguồn và các nguồn web công khai đã cấu hình."
     : "Đã rà lại bằng kho nguồn hiện có. Bật quét web để kiểm tra rộng hơn.";
   elements.writingAssistantResult.hidden = false;

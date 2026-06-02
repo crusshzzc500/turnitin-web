@@ -221,6 +221,96 @@ def build_thorough_queries(text: str, *, max_queries: int = 10) -> list[str]:
     return queries[:max_queries]
 
 
+def _region_label(index: int, total: int) -> str:
+    labels = {
+        1: ["Toan bai"],
+        2: ["Nua dau", "Nua cuoi"],
+        3: ["Phan dau", "Phan giua", "Phan cuoi"],
+        4: ["Mo dau", "Phan giua dau", "Phan giua cuoi", "Ket bai"],
+        5: ["Mo dau", "Phan dau", "Phan giua", "Phan cuoi", "Ket bai"],
+    }
+    return labels.get(total, [f"Vung {position + 1}/{total}" for position in range(total)])[index]
+
+
+def _document_regions(text: str, *, maximum: int = 5) -> list[dict[str, Any]]:
+    clean = normalize_display_text(text).strip()
+    words = count_words(clean)
+    if not clean or words <= 0 or maximum <= 0:
+        return []
+    total = min(maximum, max(1, (words + 19) // 20))
+    regions = []
+    for index in range(total):
+        start = round((len(clean) * index) / total)
+        end = round((len(clean) * (index + 1)) / total)
+        if index:
+            while start < len(clean) and start > 0 and not clean[start - 1].isspace():
+                start += 1
+        if index < total - 1:
+            while end < len(clean) and not clean[end].isspace():
+                end += 1
+        excerpt = clean[start:end].strip()
+        regions.append({"index": index + 1, "label": _region_label(index, total), "text": excerpt})
+    return regions
+
+
+def regional_coverage(
+    text: str,
+    *,
+    fingerprint_queries: list[str],
+    searched_queries: list[str],
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    regions = _document_regions(text)
+    exact_document_match = any(bool(source.get("exactDocumentMatch")) for source in sources)
+    evidence_queries = [
+        str(source.get("matchedQuery") or "")
+        for source in sources
+        if str(source.get("matchedQuery") or "").strip()
+    ]
+
+    def overlaps(region_text: str, queries: list[str]) -> bool:
+        return any(_query_overlap(region_text, query) >= 0.25 for query in queries)
+
+    rows = []
+    for region in regions:
+        fingerprinted = overlaps(region["text"], fingerprint_queries)
+        searched = exact_document_match or overlaps(region["text"], searched_queries)
+        has_evidence = exact_document_match or overlaps(region["text"], evidence_queries)
+        rows.append(
+            {
+                "index": region["index"],
+                "label": region["label"],
+                "fingerprinted": fingerprinted,
+                "searched": searched,
+                "hasEvidence": has_evidence,
+            }
+        )
+    total = len(rows)
+    fingerprinted_regions = sum(bool(region["fingerprinted"]) for region in rows)
+    searched_regions = sum(bool(region["searched"]) for region in rows)
+    evidence_regions = sum(bool(region["hasEvidence"]) for region in rows)
+    needs_review = not exact_document_match and evidence_regions < total
+    return {
+        "totalRegions": total,
+        "fingerprintedRegions": fingerprinted_regions,
+        "searchedRegions": searched_regions,
+        "evidenceRegions": evidence_regions,
+        "completeDocumentMatch": exact_document_match,
+        "needsReview": needs_review,
+        "regions": rows,
+        "message": (
+            "Da tim thay ban sao toan bai tren mot URL cong khai."
+            if exact_document_match
+            else f"Da gui tim kiem {searched_regions}/{total} vung va tim thay bang chung URL cho {evidence_regions}/{total} vung."
+        ),
+        "warning": (
+            "Vung chua co bang chung web van can ra thu cong; thieu ket qua tim kiem khong chung minh noi dung nguyen goc."
+            if needs_review
+            else ""
+        ),
+    }
+
+
 def normalize_candidate_url(value: str) -> str:
     parsed = urlparse(value.strip())
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
@@ -333,11 +423,12 @@ class WebDiscovery:
             self._enrichment_remaining = self.settings.web_discovery_enrichment_max_sources
         query_builder = build_thorough_queries if thorough else build_queries
         queries = query_builder(text, max_queries=self.settings.web_discovery_max_queries)
+        fingerprint_queries = list(queries)
         if not queries:
             return self._result_payload(DiscoveryResult(
                 "none", False, False, [], 0, 0,
                 "Không tạo được truy vấn tìm kiếm từ tài liệu.", [],
-            ), thorough=thorough)
+            ), thorough=thorough, comparison_text=text, fingerprint_queries=fingerprint_queries)
         result_limit = max_results or self.settings.web_discovery_max_results
         result_limit = max(1, min(20, int(result_limit)))
         result: DiscoveryResult | None = None
@@ -350,7 +441,7 @@ class WebDiscovery:
                 comparison_text=text,
             )
         if self._has_exact_document_match(result):
-            return self._result_payload(result, thorough=thorough)
+            return self._result_payload(result, thorough=thorough, comparison_text=text, fingerprint_queries=fingerprint_queries)
         gemini_queries = self._expand_queries_with_gemini(text, queries)
         queries = (
             gemini_queries
@@ -372,7 +463,7 @@ class WebDiscovery:
             )
             result = primary if result is None else self._merge_results(result, primary)
         if self._has_exact_document_match(result):
-            return self._result_payload(result, thorough=thorough)
+            return self._result_payload(result, thorough=thorough, comparison_text=text, fingerprint_queries=fingerprint_queries)
         if (
             self.settings.exa_api_key
             and self._time_available()
@@ -430,7 +521,7 @@ class WebDiscovery:
             )
             result = fallback if result is None else self._merge_results(result, fallback)
         if result is not None:
-            return self._result_payload(result, thorough=thorough)
+            return self._result_payload(result, thorough=thorough, comparison_text=text, fingerprint_queries=fingerprint_queries)
         if progress_callback:
             progress_callback(len(queries), len(queries), 0)
         return self._result_payload(DiscoveryResult(
@@ -442,7 +533,7 @@ class WebDiscovery:
             0,
             "Chưa cấu hình Tavily, Exa, WebSearchAPI.ai, Linkup, Serper hoặc Brave nên hệ thống chỉ đối chiếu kho nguồn đã có.",
             [],
-        ), thorough=thorough)
+        ), thorough=thorough, comparison_text=text, fingerprint_queries=fingerprint_queries)
 
     @staticmethod
     def _remaining_result_limit(result_limit: int, result: DiscoveryResult | None) -> int:
@@ -459,10 +550,23 @@ class WebDiscovery:
         return min(maximum, cls._remaining_result_limit(result_limit, result))
 
     @staticmethod
-    def _result_payload(result: DiscoveryResult, *, thorough: bool) -> dict[str, Any]:
+    def _result_payload(
+        result: DiscoveryResult,
+        *,
+        thorough: bool,
+        comparison_text: str,
+        fingerprint_queries: list[str],
+    ) -> dict[str, Any]:
         payload = result.to_dict()
         payload["verificationMode"] = "thorough" if thorough else "fast"
-        payload["queryStrategy"] = "whole-document-fingerprint-v3" if thorough else payload["queryStrategy"]
+        payload["queryStrategy"] = "whole-document-fingerprint-v4" if thorough else payload["queryStrategy"]
+        if thorough:
+            payload["regionalCoverage"] = regional_coverage(
+                comparison_text,
+                fingerprint_queries=fingerprint_queries,
+                searched_queries=result.queries if result.external_processing else [],
+                sources=result.sources,
+            )
         return payload
 
     def _expand_queries_with_openai(self, text: str, queries: list[str]) -> list[str]:
@@ -1141,6 +1245,7 @@ class WebDiscovery:
             "url": canonical_url,
             "relevanceScore": round(relevance, 3),
             "exactDocumentMatch": exact_document_match,
+            "matchedQuery": query,
         }
 
     def _enrich_content(

@@ -41,6 +41,7 @@ from backend.web_discovery import (
     build_thorough_queries,
     candidate_relevance,
     normalize_candidate_url,
+    regional_coverage,
 )
 from backend.writing_assistant import CitationWritingAssistant
 
@@ -1039,7 +1040,7 @@ class WebDiscoveryTest(unittest.TestCase):
                 payload = discovery.discover_and_index(text, organization_id=1, max_results=20, thorough=True)
             self.assertEqual(calls, ["serper", "tavily", "exa", "websearchapi", "linkup", "brave"])
             self.assertEqual(payload["verificationMode"], "thorough")
-            self.assertEqual(payload["queryStrategy"], "whole-document-fingerprint-v3")
+            self.assertEqual(payload["queryStrategy"], "whole-document-fingerprint-v4")
             self.assertEqual(payload["indexed"], 20)
             self.assertEqual(tavily.call_args.args[2], 6)
             self.assertEqual(exa.call_args.args[2], 4)
@@ -1124,6 +1125,44 @@ class WebDiscoveryTest(unittest.TestCase):
         self.assertIn("giữabài", joined)
         self.assertIn("cuốibài", joined)
 
+    def test_regional_coverage_distinguishes_searches_from_verified_url_evidence(self) -> None:
+        regions = [
+            "beginmarker alpha01 alpha02 alpha03 alpha04 alpha05 alpha06 alpha07 alpha08 alpha09 alpha10 alpha11 alpha12 alpha13 alpha14 alpha15 alpha16 alpha17 alpha18 alpha19.",
+            "secondmarker beta01 beta02 beta03 beta04 beta05 beta06 beta07 beta08 beta09 beta10 beta11 beta12 beta13 beta14 beta15 beta16 beta17 beta18 beta19.",
+            "middlemarker gamma01 gamma02 gamma03 gamma04 gamma05 gamma06 gamma07 gamma08 gamma09 gamma10 gamma11 gamma12 gamma13 gamma14 gamma15 gamma16 gamma17 gamma18 gamma19.",
+            "fourthmarker delta01 delta02 delta03 delta04 delta05 delta06 delta07 delta08 delta09 delta10 delta11 delta12 delta13 delta14 delta15 delta16 delta17 delta18 delta19.",
+            "endmarker omega01 omega02 omega03 omega04 omega05 omega06 omega07 omega08 omega09 omega10 omega11 omega12 omega13 omega14 omega15 omega16 omega17 omega18 omega19.",
+        ]
+        coverage = regional_coverage(
+            " ".join(regions),
+            fingerprint_queries=regions,
+            searched_queries=regions,
+            sources=[
+                {"matchedQuery": regions[0]},
+                {"matchedQuery": regions[-1]},
+            ],
+        )
+        self.assertEqual(coverage["totalRegions"], 5)
+        self.assertEqual(coverage["fingerprintedRegions"], 5)
+        self.assertEqual(coverage["searchedRegions"], 5)
+        self.assertGreaterEqual(coverage["evidenceRegions"], 2)
+        self.assertLess(coverage["evidenceRegions"], 5)
+        self.assertTrue(coverage["needsReview"])
+        self.assertIn("khong chung minh", coverage["warning"])
+
+    def test_exact_document_match_marks_all_regions_as_verified(self) -> None:
+        coverage = regional_coverage(
+            " ".join(f"documentword{index}" for index in range(100)),
+            fingerprint_queries=[],
+            searched_queries=[],
+            sources=[{"exactDocumentMatch": True}],
+        )
+        self.assertEqual(coverage["totalRegions"], 5)
+        self.assertEqual(coverage["searchedRegions"], 5)
+        self.assertEqual(coverage["evidenceRegions"], 5)
+        self.assertTrue(coverage["completeDocumentMatch"])
+        self.assertFalse(coverage["needsReview"])
+
     def test_thorough_discovery_sends_whole_document_queries_to_provider(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1146,7 +1185,7 @@ class WebDiscoveryTest(unittest.TestCase):
             self.assertIn("BEGINMARKER", submitted_queries)
             self.assertIn("MIDDLEMARKER", submitted_queries)
             self.assertIn("ENDMARKER", submitted_queries)
-            self.assertEqual(payload["queryStrategy"], "whole-document-fingerprint-v3")
+            self.assertEqual(payload["queryStrategy"], "whole-document-fingerprint-v4")
 
     def test_candidate_relevance_rewards_phrase_overlap_and_rejects_noise(self) -> None:
         query = "quản trị dữ liệu giáo dục minh bạch trách nhiệm giải trình"
@@ -1557,6 +1596,13 @@ class CitationWritingAssistantTest(unittest.TestCase):
                         "source": {"id": 1},
                     }
                 ],
+                "webDiscovery": {
+                    "regionalCoverage": {
+                        "searchedRegions": 5,
+                        "evidenceRegions": 2,
+                        "totalRegions": 5,
+                    }
+                },
             }
 
             def fake_request(url, payload, *, headers, timeout):
@@ -1601,6 +1647,8 @@ class CitationWritingAssistantTest(unittest.TestCase):
             self.assertEqual(captured["headers"]["x-goog-api-key"], "gemini-test-key")
             self.assertEqual(captured["payload"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "high")
             self.assertIn("Do not help evade plagiarism detection", captured["payload"]["contents"][0]["parts"][0]["text"])
+            self.assertIn("PUBLIC-WEB REGIONAL EVIDENCE", captured["payload"]["contents"][0]["parts"][0]["text"])
+            self.assertIn("Missing public-web evidence does not prove originality", captured["payload"]["contents"][0]["parts"][0]["text"])
             self.assertIn("[Nguồn 1]", result["revision"])
             self.assertEqual(result["mode"], "citation-guided-revision")
 
@@ -1785,7 +1833,7 @@ class ApiTest(unittest.TestCase):
                 )
                 self.assertTrue(health["ok"])
                 self.assertEqual(health["searchBackend"], "sqlite-fts5")
-                self.assertEqual(health["webDiscoveryStrategy"], "adaptive-fingerprint-v3")
+                self.assertEqual(health["webDiscoveryStrategy"], "adaptive-fingerprint-v4")
                 self.assertEqual(health["webDiscoveryLimits"]["queries"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["parallelWorkers"], 10)
                 self.assertEqual(health["webDiscoveryLimits"]["mode"], "fast")

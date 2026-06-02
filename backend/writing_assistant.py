@@ -120,9 +120,26 @@ class CitationWritingAssistant:
     def _source_context(report: dict[str, Any]) -> str:
         sources = report.get("sources") or []
         matched_segments = report.get("matchedSegments") or []
+        coverage = (report.get("webDiscovery") or {}).get("regionalCoverage") or {}
+        coverage_note = ""
+        if coverage:
+            coverage_note = (
+                "PUBLIC-WEB REGIONAL EVIDENCE: "
+                f"searched {coverage.get('searchedRegions', 0)}/{coverage.get('totalRegions', 0)} regions; "
+                f"verified URL evidence {coverage.get('evidenceRegions', 0)}/{coverage.get('totalRegions', 0)} regions. "
+                "Missing public-web evidence does not prove originality. Keep [Cần trích dẫn nguồn] markers "
+                "where attribution still needs manual review."
+            )
         if not sources and not matched_segments:
-            return "No verified source was found. Use [Cần trích dẫn nguồn] for any passage that still needs attribution."
-        lines = []
+            return "\n".join(
+                note
+                for note in [
+                    coverage_note,
+                    "No verified source was found. Use [Cần trích dẫn nguồn] for any passage that still needs attribution.",
+                ]
+                if note
+            )
+        lines = [coverage_note] if coverage_note else []
         source_numbers: dict[int, int] = {}
         for number, source in enumerate(sources[:12], start=1):
             source_id = int(source.get("id") or 0)

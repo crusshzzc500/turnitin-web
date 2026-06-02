@@ -167,7 +167,7 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                     "searchBackend": self.context.search_backend.name,
                     "webDiscovery": self.context.web_discovery.status(),
                     "writingAssistant": self.context.writing_assistant.status(),
-                    "webDiscoveryStrategy": "adaptive-fingerprint-v3",
+                    "webDiscoveryStrategy": "adaptive-fingerprint-v4",
                     "publicMode": self.context.settings.public_mode,
                     "authRequired": self.context.settings.auth_mode == "password",
                     "documentMaxBytes": self.context.settings.document_max_bytes,
@@ -646,6 +646,9 @@ class AppRequestHandler(BaseHTTPRequestHandler):
                 "externalProcessing": result["externalProcessing"],
                 "phase": audit_phase,
                 "verificationMode": result.get("verificationMode", "thorough" if thorough else "fast"),
+                "searchedRegions": (result.get("regionalCoverage") or {}).get("searchedRegions"),
+                "evidenceRegions": (result.get("regionalCoverage") or {}).get("evidenceRegions"),
+                "totalRegions": (result.get("regionalCoverage") or {}).get("totalRegions"),
             },
         )
         return result

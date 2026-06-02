@@ -94,8 +94,10 @@ WebSearchAPI.ai dùng tìm kiếm cơ bản không tải toàn văn; Linkup dùn
 Serper precision chỉ lấy các đoạn tóm tắt kết quả Google và bị khóa tối đa `1` truy vấn cho mỗi báo cáo.
 Riêng lượt tự rà của trợ lý Gemini dùng chế độ xác minh sâu: dừng sớm khi đã thấy bản sao toàn bài; nếu chưa,
 hệ thống hỏi thêm từng nhà cung cấp đã cấu hình trong ngân sách tối đa `55` giây cho mỗi lượt rà. Chế độ này
-có thể dùng thêm quota miễn phí để tăng độ phủ nguồn. Bộ chọn `whole-document-fingerprint-v3` giữ truy vấn
+có thể dùng thêm quota miễn phí để tăng độ phủ nguồn. Bộ chọn `whole-document-fingerprint-v4` giữ truy vấn
 mạnh nhất để bắt nguồn nhanh và phân bổ thêm dấu vân tay xuyên suốt phần đầu, giữa, cuối tài liệu dài.
+Chế độ này còn trả riêng số vùng đã gửi tìm kiếm và số vùng đã có bằng chứng URL; vùng chưa có bằng chứng
+vẫn phải rà thủ công vì thiếu kết quả tìm kiếm không chứng minh nội dung nguyên gốc.
 Có thể điều chỉnh giới hạn bằng
 `MINH_CHUNG_WEB_DISCOVERY_MAX_QUERIES`, `MINH_CHUNG_WEB_DISCOVERY_MAX_RESULTS` và
 `MINH_CHUNG_WEB_DISCOVERY_MAX_CONTENT_CHARS`. Số truy vấn đồng thời dùng
@@ -165,7 +167,7 @@ $env:MINH_CHUNG_GEMINI_TIMEOUT_SECONDS = '4'
 
 When Gemini is configured, a report can open a citation-aware revision assistant. The user must explicitly enable public-web scanning before requesting a revision. The server scans the original draft, asks Gemini to improve clarity and add source markers, scans the proposed revision again, and returns both similarity percentages for review.
 
-The two assistant scans use a bounded thorough verification mode. Unless an exact document match is already found, the server consults each configured public-web provider with small per-provider caps. The `whole-document-fingerprint-v3` selector keeps the strongest fingerprint first and reserves representative queries across the beginning, middle, and end of a long document. This can use more free-tier quota than a normal report and has a default budget of up to `55` seconds for each web scan.
+The two assistant scans use a bounded thorough verification mode. Unless an exact document match is already found, the server consults each configured public-web provider with small per-provider caps. The `whole-document-fingerprint-v4` selector keeps the strongest fingerprint first and reserves representative queries across the beginning, middle, and end of a long document. It reports searched regions separately from regions with verified URL evidence, because missing public-web evidence does not prove originality. This can use more free-tier quota than a normal report and has a default budget of up to `55` seconds for each web scan.
 
 The assistant is intentionally not a plagiarism-evasion or AI-detector-evasion tool. It does not claim that generated writing is human-authored or original. It preserves quotations, adds `[Nguồn n]` markers for verified sources, and uses `[Cần trích dẫn nguồn]` when attribution still needs manual work. Turnitin is not called unless a future deployment receives an official licensed API integration.
 
